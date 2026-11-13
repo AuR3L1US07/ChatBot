@@ -337,6 +337,14 @@ def write_settings(patch: dict) -> dict:
         cur['persona'] = patch['persona'][:2000]
     if patch.get('group_activity') in ACTIVITY_LEVELS:
         cur['group_activity'] = patch['group_activity']
+    if isinstance(patch.get('chat_order'), dict):
+        # How the admin page lists chats (drag to reorder): section order + names per section.
+        o = patch['chat_order']
+        clean = {'sections': [s for s in o.get('sections') or [] if s in ('private', 'group')][:2]}
+        for sec in ('private', 'group'):
+            names = o.get(sec) if isinstance(o.get(sec), list) else []
+            clean[sec] = list(dict.fromkeys(str(n)[:64] for n in names if isinstance(n, str) and n))[:500]
+        cur['chat_order'] = clean
     _write_private_json(_SETTINGS_FILE, cur)
     return cur
 

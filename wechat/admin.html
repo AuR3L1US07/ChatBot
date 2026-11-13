@@ -142,7 +142,23 @@ main{padding:26px 28px 40px;max-width:1240px;width:100%;margin:0 auto}
 .list{border-right:1px solid var(--line)}
 .list .s{padding:12px;border-bottom:1px solid var(--line)}
 .list .items{overflow:auto;flex:1;padding:6px 8px}
-.sec{font-size:12px;color:var(--muted);padding:10px 8px 4px}
+.sec{font-size:12px;color:var(--muted);padding:10px 8px 4px;display:flex;align-items:center;gap:4px;border-radius:8px;user-select:none;cursor:grab}
+.sec .grip{width:14px;height:14px;fill:currentColor;opacity:0;margin-left:-4px;transition:opacity .15s}
+.list:hover .sec .grip,.sorting .sec .grip{opacity:.55}
+#c-list .item{user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;transition:box-shadow .15s,background .15s,transform .15s}
+#c-list .dragging{position:relative;z-index:2;background:#fff;box-shadow:0 10px 28px rgba(15,23,42,.16),0 0 0 1px rgba(7,193,96,.35);transform:scale(1.02);cursor:grabbing;border-radius:12px}
+#c-list .grp.dragging{padding-bottom:4px}
+.sorting,.sorting *{cursor:grabbing!important}
+.sorting .item:not(.dragging):hover{background:transparent}
+.list .hint{font-size:11px;color:var(--muted);padding:6px 16px 0;opacity:.8}
+/* scrollbars: thin, soft, in the page's palette */
+*{scrollbar-width:thin;scrollbar-color:#d5dbe3 transparent}
+::-webkit-scrollbar{width:10px;height:10px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:#d5dbe3;border-radius:99px;border:3px solid transparent;background-clip:padding-box}
+::-webkit-scrollbar-thumb:hover{background:#b8c1cc;background-clip:padding-box}
+::-webkit-scrollbar-button{display:none;width:0;height:0}
+::-webkit-scrollbar-corner{background:transparent}
 .item{padding:9px 10px;border-radius:10px;cursor:pointer;display:flex;gap:10px;align-items:center}
 .item:hover{background:var(--soft)}
 .item.on{background:var(--green-weak)}
@@ -384,7 +400,7 @@ details summary{cursor:pointer;color:var(--muted);font-size:13px;margin-top:14px
         <div class="ph"><div class="ic"><svg class="i"><use href="#i-chat"/></svg></div><div><h2>对话管理</h2><p>查看每个对话的聊天记录，并给它单独设置</p></div></div>
         <div class="card chats">
           <div class="list">
-            <div class="s"><input id="c-search" type="text" placeholder="搜索对话"></div>
+            <div class="s"><input id="c-search" type="text" placeholder="搜索对话"></div><div class="hint">长按拖动，可以调整分组和对话的顺序</div>
             <div class="items" id="c-list"></div>
           </div>
           <div>
@@ -733,18 +749,112 @@ function chatNames() {
   const names = new Map();
   for (const c of logData.chats || []) names.set(c.name, {name:c.name, group:!!c.group, preview:c.preview});
   for (const e of logData.entries || []) if (e.chat && !names.has(e.chat)) names.set(e.chat, {name:e.chat, group:!!e.group, preview:e.text});
-  return [...names.values()];
+  return [...names.values()].filter(c => !SYS_CHATS.has(c.name));
 }
+// ── chat list order: long-press (or click-and-hold) to drag a section or a chat ──
+const SYS_CHATS = new Set(['微信团队', '文件传输助手', '订阅号', '服务通知', '微信支付', '腾讯新闻', '新的朋友']);
+const SECS = {private: '私聊', group: '群聊'};
+function chatOrder() {
+  const o = settings.chat_order || {};
+  const secs = (o.sections || []).filter(s => SECS[s]);
+  for (const s of Object.keys(SECS)) if (!secs.includes(s)) secs.push(s);
+  return {sections: secs, private: o.private || [], group: o.group || []};
+}
+// Chats the user placed keep their place; new ones (not placed yet) come first, newest first.
+function ordered(arr, saved) {
+  const pos = new Map(saved.map((n, i) => [n, i]));
+  return [...arr.filter(c => !pos.has(c.name)), ...arr.filter(c => pos.has(c.name)).sort((a, b) => pos.get(a.name) - pos.get(b.name))];
+}
+let orderTimer = null;
+function saveOrder() {
+  const o = {sections: [...document.querySelectorAll('#c-list .grp')].map(g => g.dataset.sec)};
+  for (const g of document.querySelectorAll('#c-list .grp')) o[g.dataset.sec] = [...g.querySelectorAll('.item')].map(i => i.dataset.name);
+  const old = chatOrder();
+  for (const s of Object.keys(SECS)) {  // keep chats hidden by the search box in the saved order
+    const shown = new Set(o[s] || []);
+    o[s] = [...(o[s] || []), ...old[s].filter(n => !shown.has(n))];
+  }
+  settings.chat_order = o;
+  clearTimeout(orderTimer);
+  orderTimer = setTimeout(async () => {
+    try { settings = await api('/api/settings', {chat_order: o}); toast('顺序已保存'); } catch (e) { toast('保存顺序失败：' + e.message); }
+  }, 300);
+}
+const drag = {el: null, timer: null, x: 0, y: 0, moved: false, justDropped: 0, scroll: 0};
+function dragTarget(e) {
+  if ($('#c-search').value.trim()) return null;  // the order is ambiguous while filtering
+  const sec = e.target.closest('#c-list .sec');
+  if (sec) return sec.closest('.grp');
+  return e.target.closest('#c-list .item');
+}
+function endDrag(save) {
+  clearTimeout(drag.timer); drag.timer = null;
+  cancelAnimationFrame(drag.scroll);
+  if (!drag.el) return;
+  drag.el.classList.remove('dragging');
+  $('#c-list').classList.remove('sorting');
+  if (save && drag.moved) { saveOrder(); drag.justDropped = Date.now(); }
+  drag.el = null;
+}
+$('#c-list').addEventListener('pointerdown', e => {
+  if (e.button !== 0) return;
+  const t = dragTarget(e); if (!t) return;
+  drag.x = e.clientX; drag.y = e.clientY; drag.moved = false;
+  clearTimeout(drag.timer);
+  drag.timer = setTimeout(() => {
+    drag.el = t; t.classList.add('dragging'); $('#c-list').classList.add('sorting');
+    if (navigator.vibrate) navigator.vibrate(15);
+  }, 350);
+});
+document.addEventListener('pointermove', e => {
+  if (!drag.el) {
+    if (drag.timer && Math.hypot(e.clientX - drag.x, e.clientY - drag.y) > 8) { clearTimeout(drag.timer); drag.timer = null; }
+    return;
+  }
+  e.preventDefault();
+  drag.y = e.clientY;
+  const el = drag.el, parent = el.parentElement;
+  const sibs = [...parent.children].filter(n => n !== el && n.classList.contains(el.classList.contains('grp') ? 'grp' : 'item'));
+  const before = sibs.find(n => { const r = n.getBoundingClientRect(); return e.clientY < r.top + r.height / 2; });
+  const next = before || null;
+  if (el.nextElementSibling !== next && !(next === null && el === parent.lastElementChild)) {
+    // FLIP: animate the siblings that shift.
+    const first = new Map(sibs.map(n => [n, n.getBoundingClientRect().top]));
+    parent.insertBefore(el, next);
+    for (const n of sibs) {
+      const dy = first.get(n) - n.getBoundingClientRect().top;
+      if (dy) n.animate([{transform: `translateY(${dy}px)`}, {transform: 'none'}], {duration: 160, easing: 'ease-out'});
+    }
+    drag.moved = true;
+  }
+  // Auto-scroll near the list's top and bottom edge.
+  cancelAnimationFrame(drag.scroll);
+  const box = $('#c-list'), r = box.getBoundingClientRect();
+  const step = () => {
+    const d = drag.y < r.top + 40 ? -8 : drag.y > r.bottom - 40 ? 8 : 0;
+    if (d && drag.el) { box.scrollTop += d; drag.scroll = requestAnimationFrame(step); }
+  };
+  drag.scroll = requestAnimationFrame(step);
+}, {passive: false});
+document.addEventListener('pointerup', () => endDrag(true));
+document.addEventListener('pointercancel', () => endDrag(false));
+// While dragging on a touch screen the page must not scroll instead.
+document.addEventListener('touchmove', e => { if (drag.el) e.preventDefault(); }, {passive: false});
+$('#c-list').addEventListener('contextmenu', e => { if (drag.el || drag.timer) e.preventDefault(); });
 function renderList() {
   const q = $('#c-search').value.trim().toLowerCase();
   const all = chatNames().filter(c => !q || c.name.toLowerCase().includes(q));
   const custom = (settings.chats || {});
-  const sec = (title, arr) => arr.length ? `<div class="sec">${title} · ${arr.length}</div>` + arr.map(c =>
-    `<div class="item ${current === c.name ? 'on' : ''}" data-name="${esc(c.name)}"><div class="av-s"><svg class="i"><use href="#i-${c.group ? 'users' : 'user'}"/></svg></div><div class="tx"><div class="nm">${esc(c.name)}</div><div class="pv">${esc(c.preview || '')}</div></div>${chatTag(c, custom[c.name])}</div>`).join('') : '';
-  $('#c-list').innerHTML = sec('私聊', all.filter(c => !c.group)) + sec('群聊', all.filter(c => c.group)) || '<div class="empty">还没有对话</div>';
+  const order = chatOrder();
+  const grip = '<svg class="grip" viewBox="0 0 24 24"><circle cx="9" cy="7" r="1.4"/><circle cx="15" cy="7" r="1.4"/><circle cx="9" cy="12" r="1.4"/><circle cx="15" cy="12" r="1.4"/><circle cx="9" cy="17" r="1.4"/><circle cx="15" cy="17" r="1.4"/></svg>';
+  const sec = (key, arr) => arr.length ? `<div class="grp" data-sec="${key}"><div class="sec">${grip}<span>${SECS[key]} · ${arr.length}</span></div>` + ordered(arr, order[key]).map(c =>
+    `<div class="item ${current === c.name ? 'on' : ''}" data-name="${esc(c.name)}"><div class="av-s"><svg class="i"><use href="#i-${c.group ? 'users' : 'user'}"/></svg></div><div class="tx"><div class="nm">${esc(c.name)}</div><div class="pv">${esc(c.preview || '')}</div></div>${chatTag(c, custom[c.name])}</div>`).join('') + '</div>' : '';
+  if (drag.el) return;  // never redraw under a drag in progress
+  $('#c-list').innerHTML = order.sections.map(k => sec(k, all.filter(c => (k === 'group') === !!c.group))).join('') || '<div class="empty">还没有对话</div>';
 }
 $('#c-search').oninput = renderList;
 $('#c-list').onclick = e => {
+  if (Date.now() - drag.justDropped < 300) return;  // the click that ends a drag
   const it = e.target.closest('.item'); if (!it) return;
   current = it.dataset.name; renderList(); renderChat();
 };
