@@ -512,11 +512,25 @@ VISION_MODEL = 'Qwen/Qwen3-VL-8B-Instruct'
 
 _LOOK_PROMPT = (
     '这是一张微信表情包。下面还有它被发出时群里的几句对话（可能没有）。'
-    '请看图判断它表达的情绪/用途，输出 JSON：{{"tags": ["无语"], "note": "什么时候适合发，不超过20字", "text": "图上的文字，没有就空"}}。\n'
+    '请看图判断它表达的情绪/用途，输出 JSON：{{"tags": ["无语"], "note": "什么时候适合发，不超过20字", "text": "图上的文字，没有就空", "safe": true, "why": ""}}。\n'
     '要求：tags 1-3 个，从这些词里选：{cats}。按画面里人物的表情和动作来选（大笑→搞笑/得意，'
     '哭→求饶/惊吓，张嘴瞪眼→震惊，摊手→无语）；不要默认选“无语”，只有画面真的是无语、汗颜、白眼才选它。'
+    'safe：机器人会在群里随手发它，下面这些情况填 false 并在 why 里写原因（不超过10字）：'
+    '真人照片或截图里有真人、色情低俗擦边、暴力血腥、侮辱歧视、政治敏感，'
+    '或者画面里有机器人自己的形象（{me}），哪怕是别人二创、恶搞的图。其余填 true。'
     '不要输出 JSON 以外的任何内容。'
 )
+
+
+def _my_look() -> str:
+    """The bot's own look, from the persona page (人设 → 形象)."""
+    try:
+        s = json.loads((pathlib.Path.home() / '.wxbot' / 'settings.json').read_text(encoding='utf-8'))
+        look = ((s.get('persona_profile') or {}).get('appearance') or '').strip()
+    except (OSError, ValueError, AttributeError):
+        look = ''
+    look = look or '橙色长发、头戴橙色花朵和黑色蝴蝶结的 Q 版二次元女孩'
+    return look.split('，内置表情包')[0][:80]
 
 
 def _look(path: pathlib.Path, ctx: list[str]) -> str:
@@ -538,7 +552,7 @@ def _look(path: pathlib.Path, ctx: list[str]) -> str:
                 'role': 'user',
                 'content': [
                     {'type': 'image_url', 'image_url': {'url': 'data:image/jpeg;base64,' + img}},
-                    {'type': 'text', 'text': _LOOK_PROMPT.format(cats=CATEGORIES)
+                    {'type': 'text', 'text': _LOOK_PROMPT.format(cats=CATEGORIES, me=_my_look())
                      + '\n对话：\n' + ('\n'.join(ctx) if ctx else '（没有）')},
                 ],
             }],
@@ -580,6 +594,10 @@ def _tag_one(item: dict) -> None:
                 note = data['note'][:40]
             if isinstance(data.get('text'), str) and data['text'].strip():
                 item['text'] = data['text'].strip()[:30]
+            if data.get('safe') is False:
+                # Kept (the admin can look and re-enable it), never sent on its own.
+                item['disabled'] = True
+                item['auto_off'] = str(data.get('why') or '').strip()[:12] or '不适合发'
         except ValueError:
             pass
     item['tags'] = tags or ['搞笑']
