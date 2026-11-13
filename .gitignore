@@ -1,0 +1,7 @@
+*.deb
+*.tmp
+.parts/
+admin-proxy/certs/
+__pycache__/
+*.pyc
+.env

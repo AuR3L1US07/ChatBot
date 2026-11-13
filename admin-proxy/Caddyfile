@@ -1,0 +1,36 @@
+# HTTPS front for the WeChat bot admin page (https://<server-ip>:8443).
+# Login is handled by the admin page itself (wxagent.py); the live WeChat screen
+# (noVNC) is only proxied for requests that carry a valid admin session.
+{
+	admin off
+	auto_https off
+}
+
+:8443 {
+	tls /certs/server.crt /certs/server.key
+	encode zstd gzip
+	log {
+		output stdout
+		format filter {
+			request>headers>Cookie delete
+		}
+	}
+	header {
+		X-Content-Type-Options nosniff
+		X-Frame-Options SAMEORIGIN
+		Referrer-Policy no-referrer
+		-Server
+		defer
+	}
+
+	handle_path /wxscreen/* {
+		forward_auth wechat_linux:6081 {
+			uri /api/auth-check
+		}
+		reverse_proxy wechat_linux:6080
+	}
+
+	handle {
+		reverse_proxy wechat_linux:6081
+	}
+}

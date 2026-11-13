@@ -1,0 +1,964 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>微信机器人后台</title>
+<style>
+:root{--bg:#f4f6f8;--card:#fff;--text:#1d2129;--sub:#4e5969;--muted:#86909c;--line:#e9ecf0;--soft:#f6f8fa;
+--brand:#3b82f6;--green:#07c160;--green-weak:#e9f9f0;--amber:#f59e0b;--amber-weak:#fff8eb;--red:#e5484d;
+--r:14px;--shadow:0 1px 2px rgba(16,24,40,.04),0 1px 3px rgba(16,24,40,.06)}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--text);font:14px/1.55 -apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif}
+button,input,select,textarea{font:inherit;color:inherit}
+a{color:var(--brand)}
+code{background:var(--soft);padding:1px 5px;border-radius:5px;font-size:12px}
+.hidden{display:none!important}
+svg.i{width:18px;height:18px;flex:none;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.muted{color:var(--muted);font-size:13px}
+.err{color:var(--red);font-size:13px;min-height:20px;margin-top:8px}
+.ok{color:var(--green)}
+.row{display:flex;gap:8px;align-items:center}
+
+/* buttons & fields */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:8px 14px;border:1px solid var(--line);border-radius:10px;background:#fff;cursor:pointer;white-space:nowrap;text-decoration:none;color:var(--text);transition:background .12s}
+.btn:hover{background:var(--soft)}
+.btn.primary{background:var(--green);border-color:var(--green);color:#fff}
+.btn.primary:hover{filter:brightness(.96)}
+.btn.ghost{border-color:transparent;background:transparent}
+.btn.danger{color:var(--red)}
+.btn.icon{padding:7px}
+label.f{display:block;margin:16px 0 6px;font-weight:500}
+input[type=text],input[type=password],select,textarea{width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:#fff;outline:none;transition:border .12s,box-shadow .12s}
+input:focus,select:focus,textarea:focus{border-color:var(--green);box-shadow:0 0 0 3px rgba(7,193,96,.12)}
+textarea{min-height:100px;resize:vertical}
+
+/* auth screens */
+.center{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:16px}
+.auth{width:100%;max-width:400px;background:#fff;border:1px solid var(--line);border-radius:18px;padding:32px 28px;box-shadow:var(--shadow)}
+.logo{width:44px;height:44px;border-radius:12px;background:var(--green);color:#fff;display:flex;align-items:center;justify-content:center;margin-bottom:14px}
+.logo svg.i{width:24px;height:24px}
+.auth h1{font-size:20px;margin:0 0 4px}
+.auth .btn.primary{width:100%;margin-top:8px;padding:11px}
+
+/* shell */
+.shell{display:flex;min-height:100vh}
+aside{width:232px;flex:none;padding:18px 12px;display:flex;flex-direction:column;gap:2px;position:sticky;top:0;height:100vh}
+.brand{display:flex;align-items:center;gap:10px;padding:4px 10px 18px;font-weight:700;font-size:15px}
+.brand .logo{width:34px;height:34px;margin:0;border-radius:10px}
+.brand .logo svg.i{width:19px;height:19px}
+.nav-sec{font-size:12px;color:var(--muted);padding:12px 12px 4px}
+.nav{display:flex;align-items:center;gap:10px;padding:8px 12px;border-radius:10px;border:0;background:none;cursor:pointer;color:var(--sub);text-align:left;width:100%}
+.nav:hover{background:#eceff3}
+.nav.on{background:#fff;color:var(--text);font-weight:600;box-shadow:var(--shadow)}
+.nav.on svg.i{color:var(--green)}
+aside .sp{flex:1}
+.me{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:10px;color:var(--sub)}
+.content{flex:1;min-width:0;margin:10px 10px 10px 0;background:#fbfcfd;border:1px solid var(--line);border-radius:18px;display:flex;flex-direction:column}
+.topbar{display:flex;align-items:center;gap:10px;padding:14px 22px;border-bottom:1px solid var(--line);color:var(--muted);font-size:13px}
+.topbar b{color:var(--text);font-weight:500}
+.topbar .sp{flex:1}
+.pill{display:inline-flex;align-items:center;gap:5px;padding:2px 9px;border-radius:999px;font-size:12px;background:#f0f2f5;color:var(--muted)}
+.pill.on{background:var(--green-weak);color:var(--green)}
+.pill:before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor}
+main{padding:26px 28px 40px;max-width:1240px;width:100%;margin:0 auto}
+.ph{display:flex;align-items:center;gap:12px;margin-bottom:22px}
+.ph .ic{width:40px;height:40px;border-radius:12px;background:var(--green-weak);color:var(--green);display:flex;align-items:center;justify-content:center}
+.ph h2{margin:0;font-size:22px}
+.ph p{margin:2px 0 0;color:var(--muted);font-size:13px}
+
+/* cards */
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:20px 22px;box-shadow:var(--shadow)}
+.ch{display:flex;align-items:center;gap:8px;margin-bottom:4px;font-weight:600;font-size:15px}
+.ch svg.i{color:var(--green)}
+.ch .sp{flex:1}
+.grid{display:grid;gap:18px}
+.g2{grid-template-columns:minmax(0,1fr) minmax(0,1.15fr)}
+.g-set{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+.tiles{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:16px}
+.tile{background:var(--soft);border-radius:12px;padding:12px 14px}
+.tile .k{font-size:12px;color:var(--muted)}
+.tile .v{margin-top:2px;font-weight:500}
+.state{display:flex;align-items:center;gap:14px}
+.state .av{width:52px;height:52px;border-radius:14px;background:var(--soft);display:flex;align-items:center;justify-content:center;color:var(--sub)}
+.state .av.on{background:var(--green-weak);color:var(--green)}
+.state .av svg.i{width:24px;height:24px}
+.state .t{font-size:18px;font-weight:700;display:flex;align-items:center;gap:8px}
+.screen{width:100%;aspect-ratio:16/10;border:0;border-radius:12px;background:#111;margin-top:14px;display:block}
+.steps{margin:12px 0 0;padding-left:18px;color:var(--sub);font-size:13px}
+.steps li{margin:3px 0}
+.tips{margin:12px 0 0;padding-left:18px;color:var(--sub);font-size:13px}
+.tips li{margin:6px 0}
+.banner{display:flex;gap:12px;align-items:center;border-radius:var(--r);padding:14px 18px;background:var(--amber-weak);border:1px solid #fde3b0;margin-bottom:18px}
+.banner svg.i{color:var(--amber)}
+.banner .sp{flex:1}
+
+/* dashboard */
+.stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px}
+.stat{display:flex;gap:14px;align-items:center}
+.stat .ic{width:42px;height:42px;border-radius:12px;display:flex;align-items:center;justify-content:center;background:var(--green-weak);color:var(--green)}
+.stat .n{font-size:24px;font-weight:700;line-height:1.2}
+.chart{display:flex;gap:10px;align-items:flex-end;height:150px;margin-top:18px}
+.chart .b{flex:1;display:flex;gap:3px;align-items:flex-end;height:100%}
+.chart .b i{flex:1;border-radius:6px 6px 2px 2px;min-height:3px}
+.chart .b i.in{background:#cdeedd}
+.chart .b i.out{background:var(--green)}
+.chart-l{display:flex;gap:10px;font-size:12px;color:var(--muted);margin-top:6px}
+.chart-l span{flex:1;text-align:center}
+.legend{display:flex;gap:14px;font-size:12px;color:var(--muted)}
+.legend span:before{content:"";display:inline-block;width:9px;height:9px;border-radius:3px;margin-right:5px;vertical-align:-1px;background:var(--green)}
+.legend span.in:before{background:#cdeedd}
+
+/* toggles */
+.toggle{display:flex;justify-content:space-between;align-items:center;gap:16px;padding:14px 0;border-bottom:1px solid var(--line)}
+.toggle:last-child{border-bottom:0;padding-bottom:4px}
+.toggle .t{font-weight:500}
+.sw{position:relative;width:42px;height:24px;flex:none}
+.sw input{opacity:0;width:0;height:0;position:absolute}
+.sw span{position:absolute;inset:0;background:#d9dde3;border-radius:24px;transition:.15s;cursor:pointer}
+.sw span:before{content:"";position:absolute;width:20px;height:20px;left:2px;top:2px;background:#fff;border-radius:50%;transition:.15s;box-shadow:0 1px 2px rgba(0,0,0,.2)}
+.sw input:checked+span{background:var(--green)}
+.sw input:checked+span:before{transform:translateX(18px)}
+.seg{display:flex;background:var(--soft);border-radius:10px;padding:3px;gap:3px}
+.seg button{flex:1;border:0;background:transparent;padding:6px 6px;border-radius:8px;cursor:pointer;font-size:13px;color:var(--sub);white-space:nowrap;transition:background .2s,color .2s,box-shadow .2s}
+.seg button.on{background:#fff;color:var(--green);font-weight:600;box-shadow:var(--shadow)}
+
+/* conversations */
+.chats{display:grid;grid-template-columns:270px minmax(0,1fr) 300px;height:calc(100vh - 210px);min-height:540px;padding:0;overflow:hidden}
+.chats>div{min-height:0;display:flex;flex-direction:column}
+.list{border-right:1px solid var(--line)}
+.list .s{padding:12px;border-bottom:1px solid var(--line)}
+.list .items{overflow:auto;flex:1;padding:6px 8px}
+.sec{font-size:12px;color:var(--muted);padding:10px 8px 4px}
+.item{padding:9px 10px;border-radius:10px;cursor:pointer;display:flex;gap:10px;align-items:center}
+.item:hover{background:var(--soft)}
+.item.on{background:var(--green-weak)}
+.av-s{width:34px;height:34px;border-radius:10px;background:var(--green-weak);color:var(--green);display:flex;align-items:center;justify-content:center;flex:none}
+.av-s svg.i{width:17px;height:17px}
+.item .nm{font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.item .pv{font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.item .tx{min-width:0;flex:1}
+.tag{font-size:11px;padding:1px 7px;border-radius:6px;background:#eef0f3;color:var(--muted);white-space:nowrap}
+.tag.g{background:var(--green-weak);color:var(--green)}
+.thead{padding:14px 18px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:8px}
+.msgs{overflow:auto;flex:1;padding:18px;background:#f7f8fa}
+.m{margin:10px 0;max-width:78%}
+.m .who{font-size:12px;color:var(--muted);margin-bottom:2px}
+.bub{display:inline-block;padding:9px 13px;border-radius:12px;background:#fff;border:1px solid var(--line);white-space:pre-wrap;word-break:break-word}
+.m.me{margin-left:auto;text-align:right}
+.m.me .bub{background:#95ec69;border-color:#8be05f;text-align:left}
+.m .meta{font-size:11px;color:var(--muted);margin-top:3px}
+.side{border-left:1px solid var(--line);overflow:auto;padding:18px}
+.opt{padding:12px 0;border-bottom:1px solid var(--line)}
+.opt .t{font-weight:500;margin-bottom:8px;font-size:13px}
+.empty{color:var(--muted);text-align:center;padding:48px 16px}
+.toast{position:fixed;right:24px;bottom:24px;background:#fff;border:1px solid var(--line);box-shadow:0 8px 24px rgba(16,24,40,.12);padding:10px 16px;border-radius:12px;z-index:20;display:flex;gap:8px;align-items:center}
+.toast:before{content:"";width:8px;height:8px;border-radius:50%;background:var(--green)}
+.pgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px;margin-top:12px}
+.prov{border:1px solid var(--line);border-radius:10px;padding:9px 11px;background:#fff;cursor:pointer;text-align:left}
+.prov:hover{border-color:#b9e8cf}
+.prov.on{border-color:var(--green);background:var(--green-weak);box-shadow:0 0 0 2px rgba(7,193,96,.12)}
+.prov b{display:block;font-size:13px;font-weight:600}
+.prov span{display:block;font-size:11px;color:var(--muted);margin-top:1px}
+.bigswitch{transition:background .25s;display:flex;align-items:center;gap:12px;padding:14px;border-radius:12px;background:var(--soft);margin-top:12px}
+.bigswitch .t{font-weight:600}
+.bigswitch.on{background:var(--green-weak)}
+.link{border:0;background:none;color:var(--brand);cursor:pointer;padding:0;font-size:12px}
+.tag.off{background:#f1f2f4;color:var(--muted)}
+.tag.own{position:relative;padding-right:14px}
+.tag.own:after{content:"";position:absolute;right:5px;top:50%;width:5px;height:5px;margin-top:-2.5px;border-radius:50%;background:currentColor}
+details.adv{margin-top:16px;border:1px solid var(--line);border-radius:12px;background:var(--soft);overflow:hidden}
+details.adv summary{list-style:none;cursor:pointer;display:flex;align-items:center;gap:10px;padding:12px 14px;margin:0;font-weight:500;color:var(--text);font-size:14px}
+details.adv summary::-webkit-details-marker{display:none}
+details.adv summary .ic{width:30px;height:30px;border-radius:9px;background:#fff;color:var(--green);display:flex;align-items:center;justify-content:center;box-shadow:var(--shadow);flex:none}
+details.adv summary .ic svg.i{width:16px;height:16px}
+details.adv summary .sub{font-weight:400;color:var(--muted);font-size:12px}
+details.adv summary .chev{margin-left:auto;transition:transform .2s;color:var(--muted)}
+details.adv[open] summary .chev{transform:rotate(90deg)}
+details.adv summary:hover{background:#eef1f4}
+details.adv .body{padding:2px 14px 14px;background:#fff;border-top:1px solid var(--line)}
+.sgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:14px;margin-top:14px}
+.st{border:1px solid var(--line);border-radius:12px;background:#fff;overflow:hidden;display:flex;flex-direction:column;transition:box-shadow .15s,opacity .15s}
+.st:hover{box-shadow:0 4px 14px rgba(16,24,40,.08)}
+.st.off{opacity:.55}
+.st .pic{aspect-ratio:1;background:repeating-conic-gradient(#f3f4f6 0 25%,#fff 0 50%) 0 0/16px 16px;display:flex;align-items:center;justify-content:center;position:relative}
+.st .pic img{max-width:86%;max-height:86%;object-fit:contain}
+.st .pic .badge{position:absolute;left:8px;top:8px}
+.st .b{padding:10px 12px;display:flex;flex-direction:column;gap:6px;flex:1}
+.st .nm{font-weight:600}
+.chips{display:flex;flex-wrap:wrap;gap:4px}
+.chip{font-size:12px;padding:1px 8px;border-radius:999px;background:var(--green-weak);color:var(--green)}
+.st .acts{display:flex;gap:6px;flex-wrap:wrap;margin-top:auto;padding-top:4px}
+.mini{font-size:12px;padding:4px 9px;border-radius:8px}
+.toolbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.toolbar input,.toolbar select{width:auto;min-width:180px}
+.st.upload{border:1.5px dashed #cfd5dc;background:var(--soft);gap:8px;padding:12px;justify-content:center}
+.st.upload .pic{aspect-ratio:auto;height:110px;border-radius:10px;cursor:pointer;color:var(--muted);font-size:13px;flex-direction:column;gap:6px;background:#fff}
+.edit-row{display:flex;gap:6px}
+.edit-row input{padding:6px 9px;font-size:13px}
+.pf2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.pf-chips{margin-top:8px}
+.pf-chips .chip{cursor:pointer;background:var(--soft);color:var(--sub);border:1px solid var(--line);transition:background .15s,color .15s}
+.pf-chips .chip:hover{background:var(--green-weak);color:var(--green);border-color:#b9e8cf}
+.pf-preview{white-space:pre-wrap;font:13px/1.7 inherit;font-family:inherit;background:var(--soft);border-radius:10px;padding:12px 14px;margin:12px 0 0;color:var(--sub);min-height:80px}
+details summary{cursor:pointer;color:var(--muted);font-size:13px;margin-top:14px}
+
+@media (max-width:1100px){.g2,.g-set{grid-template-columns:1fr}.stats{grid-template-columns:repeat(2,minmax(0,1fr))}.chats{grid-template-columns:240px minmax(0,1fr)}.chats .side{grid-column:1/-1;border-left:0;border-top:1px solid var(--line)}.chats{height:auto}.msgs{height:480px;flex:none}}
+@media (max-width:760px){.shell{flex-direction:column}aside{width:auto;height:auto;position:static;flex-direction:row;flex-wrap:wrap;padding:10px}.brand{padding:4px 8px;width:100%}.nav-sec,aside .sp,.me{display:none}.nav{width:auto}.content{margin:0 10px 10px}main{padding:18px 16px}.chats{grid-template-columns:1fr}.list .items{max-height:260px}.stats{grid-template-columns:1fr 1fr}}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute">
+  <symbol id="i-msg" viewBox="0 0 24 24"><path d="M21 12a8.5 8.5 0 0 1-12.4 7.5L3 21l1.5-5.6A8.5 8.5 0 1 1 21 12z"/></symbol>
+  <symbol id="i-grid" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></symbol>
+  <symbol id="i-phone" viewBox="0 0 24 24"><rect x="6" y="2.5" width="12" height="19" rx="2.5"/><path d="M11 18h2"/></symbol>
+  <symbol id="i-chat" viewBox="0 0 24 24"><path d="M4 5h16v11H8l-4 4z"/></symbol>
+  <symbol id="i-bot" viewBox="0 0 24 24"><rect x="4" y="8" width="16" height="12" rx="3"/><path d="M12 8V4M9 13v1M15 13v1M2 13v3M22 13v3"/></symbol>
+  <symbol id="i-key" viewBox="0 0 24 24"><circle cx="8" cy="15" r="4"/><path d="M11 12l9-9M17 6l3 3M14 9l2 2"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 11a8 8 0 0 0-14.6-4.5L4 8M4 4v4h4M4 13a8 8 0 0 0 14.6 4.5L20 16M20 20v-4h-4"/></symbol>
+  <symbol id="i-qr" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M14 14h3v3h-3zM20 14v.01M14 20h.01M17 20h4v-3"/></symbol>
+  <symbol id="i-ext" viewBox="0 0 24 24"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></symbol>
+  <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/></symbol>
+  <symbol id="i-monitor" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></symbol>
+  <symbol id="i-in" viewBox="0 0 24 24"><path d="M12 4v12M6 10l6 6 6-6M4 20h16"/></symbol>
+  <symbol id="i-out" viewBox="0 0 24 24"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4z"/></symbol>
+  <symbol id="i-users" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0M16 4.5a3.5 3.5 0 0 1 0 7M18 14a6 6 0 0 1 3.5 6"/></symbol>
+  <symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></symbol>
+  <symbol id="i-smile" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M8.5 14a4 4 0 0 0 7 0M9 9.5h.01M15 9.5h.01"/></symbol>
+  <symbol id="i-chart" viewBox="0 0 24 24"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></symbol>
+  <symbol id="i-lock" viewBox="0 0 24 24"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></symbol>
+  <symbol id="i-pen" viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16zM14 6l4 4"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 3l10 18H2zM12 10v5M12 18h.01"/></symbol>
+  <symbol id="i-logout" viewBox="0 0 24 24"><path d="M15 4h4v16h-4M10 8l-4 4 4 4M6 12h11"/></symbol>
+  <symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></symbol>
+  <symbol id="i-chev" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></symbol>
+  <symbol id="i-upload" viewBox="0 0 24 24"><path d="M12 16V4M7 9l5-5 5 5M4 20h16"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></symbol>
+</svg>
+
+<!-- first-time setup -->
+<div id="setup" class="center hidden">
+  <div class="auth">
+    <div class="logo"><svg class="i"><use href="#i-msg"/></svg></div>
+    <h1>欢迎使用微信机器人</h1>
+    <div class="muted">先设置一个后台密码。AI 接口等其他设置，登录后再填。</div>
+    <label class="f">设置码</label>
+    <input id="su-code" type="text" autocomplete="off" placeholder="8 位设置码">
+    <div class="muted" style="margin-top:6px">在服务器上运行 <code>docker logs wechat_linux</code> 查看，用来确认是你本人在设置。</div>
+    <label class="f">后台密码（至少 8 位）</label>
+    <input id="su-pw" type="password" autocomplete="new-password">
+    <div class="err" id="su-err"></div>
+    <button class="btn primary" id="su-go">完成设置并进入</button>
+  </div>
+</div>
+
+<!-- login -->
+<div id="login" class="center hidden">
+  <div class="auth">
+    <div class="logo"><svg class="i"><use href="#i-msg"/></svg></div>
+    <h1>微信机器人后台</h1>
+    <div class="muted">请输入后台密码</div>
+    <label class="f">密码</label>
+    <input id="li-pw" type="password" autocomplete="current-password">
+    <div class="err" id="li-err"></div>
+    <button class="btn primary" id="li-go">登录</button>
+  </div>
+</div>
+
+<!-- app -->
+<div id="app" class="shell hidden">
+  <aside>
+    <div class="brand"><div class="logo"><svg class="i"><use href="#i-msg"/></svg></div>微信机器人</div>
+    <div id="nav">
+      <div class="nav-sec">首页</div>
+      <button class="nav on" data-tab="dash"><svg class="i"><use href="#i-grid"/></svg>仪表盘</button>
+      <button class="nav" data-tab="wechat"><svg class="i"><use href="#i-phone"/></svg>微信登录</button>
+      <button class="nav" data-tab="chats"><svg class="i"><use href="#i-chat"/></svg>对话管理</button>
+      <button class="nav" data-tab="stickers"><svg class="i"><use href="#i-smile"/></svg>表情包管理</button>
+      <div class="nav-sec">配置</div>
+      <button class="nav" data-tab="settings"><svg class="i"><use href="#i-bot"/></svg>机器人设置</button>
+      <button class="nav" data-tab="persona"><svg class="i"><use href="#i-pen"/></svg>人设</button>
+      <button class="nav" data-tab="model"><svg class="i"><use href="#i-key"/></svg>AI 接口</button>
+      <button class="nav" data-tab="account"><svg class="i"><use href="#i-gear"/></svg>后台设置</button>
+    </div>
+    <div class="sp"></div>
+    <button class="nav" id="logout"><svg class="i"><use href="#i-logout"/></svg>退出登录</button>
+  </aside>
+
+  <div class="content">
+    <div class="topbar"><span>首页</span>›<b id="crumb">仪表盘</b><span class="sp"></span><span class="pill" id="hd-status">未登录</span></div>
+    <main>
+      <div class="banner hidden" id="warn-model">
+        <svg class="i"><use href="#i-alert"/></svg>
+        <div><b>还没有填写 AI 接口的 API Key</b><div class="muted">机器人需要它才能回复消息，只需填一个。</div></div>
+        <span class="sp"></span><button class="btn primary" data-goto="model">去填写</button>
+      </div>
+
+      <!-- dashboard -->
+      <section data-page="dash">
+        <div class="ph"><div class="ic"><svg class="i"><use href="#i-grid"/></svg></div><div><h2>仪表盘</h2><p>机器人今天的工作情况</p></div></div>
+        <div class="stats">
+          <div class="card stat"><div class="ic"><svg class="i"><use href="#i-in"/></svg></div><div><div class="muted">今天收到</div><div class="n" id="s-in">-</div></div></div>
+          <div class="card stat"><div class="ic"><svg class="i"><use href="#i-out"/></svg></div><div><div class="muted">今天回复</div><div class="n" id="s-out">-</div></div></div>
+          <div class="card stat"><div class="ic"><svg class="i"><use href="#i-users"/></svg></div><div><div class="muted">今天活跃对话</div><div class="n" id="s-chats">-</div></div></div>
+          <div class="card stat"><div class="ic"><svg class="i"><use href="#i-smile"/></svg></div><div><div class="muted">表情库</div><div class="n" id="s-memes">-</div></div></div>
+        </div>
+        <div class="card" style="margin-top:18px">
+          <div class="ch"><svg class="i"><use href="#i-chart"/></svg>最近 7 天<span class="sp"></span><div class="legend"><span class="in">收到</span><span>回复</span></div></div>
+          <div class="chart" id="chart"></div>
+          <div class="chart-l" id="chart-l"></div>
+        </div>
+      </section>
+
+      <!-- wechat login -->
+      <section data-page="wechat" class="hidden">
+        <div class="ph"><div class="ic"><svg class="i"><use href="#i-msg"/></svg></div><div><h2>微信登录</h2><p>用官方 Linux 版微信登录小号，在网页上扫码、查看状态</p></div></div>
+        <div class="grid g2">
+          <div class="grid" style="align-content:start">
+            <div class="card">
+              <div class="state">
+                <div class="av" id="st-av"><svg class="i"><use href="#i-msg"/></svg></div>
+                <div style="flex:1;min-width:0"><div class="t"><span id="st-title">正在获取状态…</span><span class="pill" id="st-pill">离线</span></div><div class="muted" id="st-hint"></div></div>
+                <button class="btn icon ghost" id="st-refresh" title="刷新"><svg class="i"><use href="#i-refresh"/></svg></button>
+              </div>
+              <div class="tiles">
+                <div class="tile"><div class="k">客户端</div><div class="v">官方 Linux 微信（服务器上运行）</div></div>
+                <div class="tile"><div class="k">微信进程</div><div class="v" id="st-proc">-</div></div>
+              </div>
+              <div class="row" style="margin-top:16px;flex-wrap:wrap">
+                <button class="btn" id="st-relogin"><svg class="i"><use href="#i-qr"/></svg><span id="st-relogin-t">刷新二维码</span></button>
+                <a class="btn ghost" href="/wxscreen/vnc.html?path=wxscreen/websockify&autoconnect=1&resize=scale" target="_blank" rel="noopener"><svg class="i"><use href="#i-ext"/></svg>新窗口打开画面</a>
+              </div>
+            </div>
+            <div class="card">
+              <div class="ch"><svg class="i"><use href="#i-shield"/></svg>防封小贴士</div>
+              <ul class="tips">
+                <li>新号先正常使用几天（加好友、聊天、进群）再挂机器人。</li>
+                <li>手机不要切换到别的微信账号，否则服务器上的小号会掉线；安卓可用“应用分身”双开，iPhone 建议用一台备用手机挂小号。</li>
+                <li>群里只在被 @ 时回复，且有频率限制，别把机器人拉进太多群。</li>
+              </ul>
+            </div>
+          </div>
+          <div class="card">
+            <div class="ch"><svg class="i"><use href="#i-monitor"/></svg>微信画面<span class="sp"></span><button class="btn icon ghost" id="screen-reload" title="重新连接画面"><svg class="i"><use href="#i-refresh"/></svg></button></div>
+            <div class="muted" id="screen-hint">画面中出现二维码后，用小号扫码登录</div>
+            <iframe class="screen" id="screen" title="微信画面"></iframe>
+            <ol class="steps">
+              <li>等待画面中出现登录二维码（过期可点“刷新二维码”）</li>
+              <li>用微信小号扫码，并在手机上点“登录”</li>
+              <li>左侧显示“小号已在线”即登录成功</li>
+            </ol>
+          </div>
+        </div>
+      </section>
+
+      <!-- conversations -->
+      <section data-page="chats" class="hidden">
+        <div class="ph"><div class="ic"><svg class="i"><use href="#i-chat"/></svg></div><div><h2>对话管理</h2><p>查看每个对话的聊天记录，并给它单独设置</p></div></div>
+        <div class="card chats">
+          <div class="list">
+            <div class="s"><input id="c-search" type="text" placeholder="搜索对话"></div>
+            <div class="items" id="c-list"></div>
+          </div>
+          <div>
+            <div class="thead"><b id="c-title">选择一个对话</b><span id="c-tag"></span><span style="flex:1"></span><span class="muted" id="c-count"></span></div>
+            <div class="msgs" id="c-msgs"><div class="empty">从左侧选择一个对话</div></div>
+          </div>
+          <div class="side" id="c-side"><div class="empty">选择对话后可以单独设置它</div></div>
+        </div>
+      </section>
+
+      <!-- stickers -->
+      <section data-page="stickers" class="hidden">
+        <div class="ph"><div class="ic"><svg class="i"><use href="#i-smile"/></svg></div><div><h2>表情包管理</h2><p>机器人回复时会用这些表情包；可以改标签、停用、删除或上传新的</p></div></div>
+        <div class="toolbar">
+          <div class="seg" id="sk-tabs" style="width:auto"><button data-v="collected" class="on">收集的表情包 <span id="sk-n1"></span></button><button data-v="named">命名表情包 <span id="sk-n2"></span></button></div>
+          <span style="flex:1"></span>
+          <input id="sk-search" type="text" placeholder="搜索标签或名称">
+          <select id="sk-chat"></select>
+        </div>
+        <div class="muted" id="sk-intro" style="margin-top:12px"></div>
+        <div class="sgrid" id="sk-grid"></div>
+      </section>
+
+      <!-- persona -->
+      <section data-page="persona" class="hidden">
+        <div class="ph"><div class="ic"><svg class="i"><use href="#i-pen"/></svg></div><div><h2>人设</h2><p>机器人叫什么、谁开发的、什么性格、怎么说话</p></div></div>
+        <div class="banner hidden" id="pf-old" style="background:#f0f6ff;border-color:#cfe0fb">
+          <svg class="i" style="color:var(--brand)"><use href="#i-alert"/></svg>
+          <div><b>你之前手写过一段人设</b><div class="muted" id="pf-old-text"></div></div>
+        </div>
+        <div class="grid g-set">
+          <div class="card">
+            <div class="ch"><svg class="i"><use href="#i-user"/></svg>基本身份<span class="sp"></span><button class="btn mini" id="pf-preset">恢复小克预设</button></div>
+            <div class="pf2">
+              <div><label class="f">名字 *</label><input id="pf-name" type="text" maxlength="12"></div>
+              <div><label class="f">开发者 / 主人</label><input id="pf-developer" type="text" maxlength="24"></div>
+            </div>
+            <div class="muted" style="margin-top:6px">名字要和小号的微信昵称一致：别人 @、叫名字、拍一拍都是按这个名字识别的。</div>
+            <label class="f">身份定位</label><input id="pf-identity" type="text" maxlength="40" placeholder="例如：微信聊天助手、群里的吉祥物、学习搭子">
+            <label class="f">性格</label><textarea id="pf-personality" rows="2" placeholder="例如：随和、真诚、有点小幽默"></textarea>
+            <div class="chips pf-chips" data-for="pf-personality"></div>
+            <label class="f">说话方式</label><textarea id="pf-style" rows="3" placeholder="例如：口语化，一般一两句话，不用列表"></textarea>
+            <div class="chips pf-chips" data-for="pf-style"></div>
+          </div>
+          <div class="grid" style="align-content:start">
+            <div class="card">
+              <div class="ch"><svg class="i"><use href="#i-smile"/></svg>个性细节<span class="muted" style="font-weight:400">（都可以不填）</span></div>
+              <label class="f">口头禅</label><input id="pf-catchphrases" type="text" placeholder="例如：好家伙、绝了">
+              <label class="f">兴趣和喜好</label><input id="pf-likes" type="text" placeholder="例如：喜欢猫、爱打游戏、对美食有研究">
+              <label class="f">不要做的事</label><input id="pf-avoid" type="text" placeholder="例如：不说教、不聊政治">
+              <label class="f">补充设定</label><textarea id="pf-extra" rows="3" placeholder="其他想让它知道的，比如背景故事、和群友的关系"></textarea>
+              <label class="f">自我介绍</label><textarea id="pf-intro" rows="3" placeholder="有人让它“自我介绍”时原样发出；留空用默认介绍"></textarea>
+            </div>
+            <div class="card">
+              <div class="ch"><svg class="i"><use href="#i-msg"/></svg>预览<span class="muted" style="font-weight:400">机器人实际看到的人设</span></div>
+              <pre class="pf-preview" id="pf-preview"></pre>
+              <div class="err" id="pf-err"></div>
+              <button class="btn primary" id="pf-save">保存人设</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- global settings -->
+      <section data-page="settings" class="hidden">
+        <div class="ph"><div class="ic"><svg class="i"><use href="#i-bot"/></svg></div><div><h2>机器人设置</h2><p>对所有对话生效；单个对话可以在「对话管理」里另外设置</p></div></div>
+        <div class="grid g-set">
+          <div class="card" id="g-toggles"></div>
+          <div class="grid" style="align-content:start">
+            <div class="card">
+              <div class="ch"><svg class="i"><use href="#i-pen"/></svg>人设<span class="sp"></span><button class="btn mini" data-goto="persona">去设置</button></div>
+              <div class="muted" id="g-persona-sum">名字、开发者、性格、说话方式等，在「人设」页设置</div>
+            </div>
+            <div class="card">
+              <div class="ch"><svg class="i"><use href="#i-users"/></svg>群聊积极性</div>
+              <div class="muted">越活跃越容易开口：安静只答被点名的，话痨会主动接群里的闲聊</div>
+              <div class="seg" id="g-activity" style="margin-top:12px"></div>
+              <div class="muted" id="g-memes" style="margin-top:14px"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- model & key -->
+      <section data-page="model" class="hidden">
+        <div class="ph"><div class="ic"><svg class="i"><use href="#i-key"/></svg></div><div><h2>AI 接口</h2><p>聊天、看图、给表情包打标签，全部只用这一个 API Key</p></div></div>
+        <div class="grid" style="max-width:760px">
+          <div class="card">
+            <div class="ch"><svg class="i"><use href="#i-key"/></svg>选择平台<span class="sp"></span><span class="pill" id="m-pill">未填写</span></div>
+            <div class="muted">选一个你有账号的平台，填它的 API Key 就行</div>
+            <div class="pgrid" id="m-providers"></div>
+            <label class="f">API Key</label>
+            <div class="row"><input id="m-key" type="password" autocomplete="off" placeholder="sk-..."><button class="btn" id="m-test">测试</button></div>
+            <div class="muted" id="m-hint" style="margin-top:6px"></div>
+            <div id="m-base-box">
+              <label class="f">接口地址</label>
+              <input id="m-base" type="text" placeholder="https://.../v1">
+            </div>
+            <label class="f">聊天模型</label>
+            <input id="m-model" type="text" list="m-models" autocomplete="off">
+            <datalist id="m-models"></datalist>
+            <div class="muted" style="margin-top:6px">点“测试”后可以从下拉列表里选；也可以直接填模型名</div>
+            <details id="m-adv" class="adv"><summary><span class="ic"><svg class="i"><use href="#i-gear"/></svg></span><span><div>高级设置</div><div class="sub">看图模型、修改接口地址</div></span><svg class="i chev"><use href="#i-chev"/></svg></summary>
+              <div class="body">
+              <label class="f">看图模型</label>
+              <input id="m-vision" type="text" list="m-models" autocomplete="off" placeholder="留空表示不看图">
+              <div class="muted" style="margin-top:6px">用来看图片和给表情包打标签。这个平台不支持看图就留空。</div>
+              </div>
+            </details>
+            <div class="err" id="m-err"></div>
+            <button class="btn primary" id="m-save">保存</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- admin settings -->
+      <section data-page="account" class="hidden">
+        <div class="ph"><div class="ic"><svg class="i"><use href="#i-gear"/></svg></div><div><h2>后台设置</h2><p>微信账号行为和后台登录密码</p></div></div>
+        <div class="grid" style="max-width:520px">
+          <div class="card">
+            <div class="ch"><svg class="i"><use href="#i-user"/></svg>好友</div>
+            <div class="toggle"><div><div class="t">自动通过好友申请</div><div class="muted">有人加机器人的微信时自动同意</div></div><label class="sw"><input type="checkbox" id="a-friend"><span></span></label></div>
+          </div>
+          <div class="card">
+            <div class="ch"><svg class="i"><use href="#i-lock"/></svg>修改后台密码</div>
+            <label class="f">原密码</label><input id="p-old" type="password" autocomplete="current-password">
+            <label class="f">新密码（至少 8 位）</label><input id="p-new" type="password" autocomplete="new-password">
+            <label class="f">确认新密码</label><input id="p-new2" type="password" autocomplete="new-password">
+            <div class="err" id="p-err"></div>
+            <button class="btn" id="p-save">修改密码</button>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+async function api(path, body) {
+  const opt = body === undefined ? {} : {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)};
+  const r = await fetch(path, {credentials:'same-origin', ...opt});
+  let data = {}; try { data = await r.json(); } catch (e) {}
+  if (r.status === 401 && !path.startsWith('/api/session')) { showLogin(); throw new Error('请先登录'); }
+  if (!r.ok) throw new Error(data.error || ('请求失败 ' + r.status));
+  return data;
+}
+function toast(msg) { const t = document.createElement('div'); t.className = 'toast'; t.append(msg); document.body.append(t); setTimeout(() => t.remove(), 2000); }
+function show(id) { for (const x of ['setup','login','app']) $('#'+x).classList.toggle('hidden', x !== id); }
+function showLogin() { show('login'); stopPolling(); setTimeout(() => $('#li-pw').focus(), 0); }
+
+// ── boot ──
+async function boot() {
+  const s = await api('/api/session');
+  if (s.needs_setup) { show('setup'); return; }
+  if (!s.authed) { showLogin(); return; }
+  startApp();
+}
+
+// ── setup ──
+$('#su-go').onclick = async () => {
+  $('#su-err').textContent = '';
+  try {
+    await api('/api/setup', {code:$('#su-code').value, password:$('#su-pw').value});
+    startApp();
+  } catch (e) { $('#su-err').textContent = e.message; }
+};
+
+// ── login ──
+async function doLogin() {
+  $('#li-err').textContent = '';
+  try { await api('/api/login', {password:$('#li-pw').value}); $('#li-pw').value = ''; startApp(); }
+  catch (e) { $('#li-err').textContent = e.message; }
+}
+$('#li-go').onclick = doLogin;
+$('#li-pw').addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
+$('#logout').onclick = async () => { await api('/api/logout', {}); showLogin(); };
+
+// ── tabs ──
+let tab = 'dash';
+const TITLES = {dash:'仪表盘', wechat:'微信登录', chats:'对话管理', stickers:'表情包管理', settings:'机器人设置', persona:'人设', model:'AI 接口', account:'后台设置'};
+function go(t) {
+  tab = t;
+  for (const x of document.querySelectorAll('#nav .nav')) x.classList.toggle('on', x.dataset.tab === t);
+  for (const p of document.querySelectorAll('[data-page]')) p.classList.toggle('hidden', p.dataset.page !== t);
+  $('#crumb').textContent = TITLES[t];
+  if (t === 'wechat' && !$('#screen').src) loadScreen();
+  refresh();
+}
+$('#nav').onclick = e => { const b = e.target.closest('.nav'); if (b) go(b.dataset.tab); };
+document.addEventListener('click', e => { const g = e.target.closest('[data-goto]'); if (g) go(g.dataset.goto); });
+const SCREEN = '/wxscreen/vnc.html?path=wxscreen/websockify&autoconnect=1&resize=scale&reconnect=1&reconnect_delay=3000';
+function loadScreen() { $('#screen').src = SCREEN + '&t=' + Date.now(); }
+$('#screen-reload').onclick = loadScreen;
+
+// ── app ──
+let timer = null, settings = {}, llm = {}, logData = {entries:[], chats:[]}, current = null;
+function stopPolling() { clearInterval(timer); timer = null; }
+function startApp() {
+  show('app');
+  if (tab === 'wechat') loadScreen();
+  refresh(true);
+  stopPolling(); timer = setInterval(refresh, 10000);
+}
+async function refresh(all) {
+  try {
+    if (all || tab === 'dash' || tab === 'wechat') await loadHome();
+    if (all || tab === 'chats') await loadChats();
+    if (all || tab === 'settings') await loadSettings();
+    if (tab === 'account') { settings = await api('/api/settings'); $('#a-friend').checked = on(settings, 'auto_accept_friend'); }
+    if (tab === 'persona' && !personaDirty) await loadPersona();
+    if (tab === 'stickers' && !stickerBusy()) await loadStickers();
+    if (all || tab === 'model') await loadModel();
+  } catch (e) { /* login screen already shown on 401 */ }
+}
+
+// overview
+async function loadHome() {
+  const [st, stats, l] = await Promise.all([api('/api/status'), api('/api/stats'), api('/api/llm')]);
+  llm = l;
+  const state = !st.running ? ['微信正在启动', '几秒后会出现二维码'] : st.logged_in ? ['小号已在线', '微信正常运行中'] : ['等待扫码登录', '在右侧画面里用小号扫码，并在手机上确认'];
+  $('#st-title').textContent = state[0]; $('#st-hint').textContent = state[1];
+  for (const p of [$('#st-pill'), $('#hd-status')]) { p.textContent = st.logged_in ? '微信在线' : '微信离线'; p.classList.toggle('on', !!st.logged_in); }
+  $('#st-av').classList.toggle('on', !!st.logged_in);
+  $('#st-proc').textContent = st.running ? '运行中' : '未运行';
+  $('#st-relogin-t').textContent = st.logged_in ? '重新登录' : '刷新二维码';
+  $('#screen-hint').textContent = st.logged_in ? '这是服务器上微信的实时画面，平时不需要操作' : '画面中出现二维码后，用小号扫码登录';
+  $('#warn-model').classList.toggle('hidden', !!l.configured);
+  const t = stats.today || {};
+  $('#s-in').textContent = t.in ?? 0; $('#s-out').textContent = t.out ?? 0; $('#s-chats').textContent = t.chats ?? 0; $('#s-memes').textContent = stats.memes ?? 0;
+  const days = stats.daily || []; const max = Math.max(1, ...days.map(d => d.in));
+  $('#chart').innerHTML = days.map(d => `<div class="b" title="${d.date} 收到 ${d.in}，回复 ${d.out}"><i class="in" style="height:${d.in / max * 100}%"></i><i class="out" style="height:${d.out / max * 100}%"></i></div>`).join('');
+  $('#chart-l').innerHTML = days.map(d => `<span>${d.date.slice(5)}</span>`).join('');
+}
+$('#st-refresh').onclick = () => loadHome();
+$('#st-relogin').onclick = async () => {
+  if ($('#st-pill').classList.contains('on') && !confirm('重新登录会让当前在线的小号退出，需要重新扫码，确定吗？')) return;
+  await api('/api/relogin', {}); toast('正在重启微信，二维码几秒后出现');
+};
+
+// global settings
+const TOGGLES = [
+  ['enabled', '启用机器人', '关闭后不再自动回复任何消息'],
+  ['dry_run', '仅预览不发送', '只草拟回复、不真正发出，方便先观察效果'],
+  ['reply_private', '私聊自动回复', ''],
+  ['reply_group_at', '群聊被 @ 时回复', ''],
+  ['reply_group_smart', '群聊智能识别', '没被 @ 也看一眼群消息，判断和自己有关才接话'],
+  ['learn', '自主学习', '旁观聊天，记住每个群的说话风格、黑话和对每个人的印象'],
+  ['steal_meme', '偷表情包', '把群友发的表情包存下来'],
+  ['use_meme', '发表情包', '聊天时偶尔用表情包代替打字'],
+];
+const LEVELS = [['quiet','安静'],['normal','均衡'],['active','活跃'],['chatty','话痨']];
+const DEFAULT_ON = {dry_run:true};  // same defaults as wxbot.py DEFAULT_SETTINGS
+const on = (s, k) => s[k] === undefined ? (DEFAULT_ON[k] ?? true) : !!s[k];
+function sw(checked, attrs) { return `<label class="sw"><input type="checkbox" ${checked ? 'checked' : ''} ${attrs}><span></span></label>`; }
+async function loadSettings() {
+  settings = await api('/api/settings');
+  $('#g-toggles').innerHTML = '<div class="ch"><svg class="i"><use href="#i-bot"/></svg>功能开关</div>' + TOGGLES.map(([k, t, h]) =>
+    `<div class="toggle"><div><div class="t">${t}</div>${h ? `<div class="muted">${h}</div>` : ''}</div>${sw(on(settings, k), `data-g="${k}"`)}</div>`).join('');
+  $('#g-persona-sum').textContent = `现在叫「${settings.bot_name || '小克'}」，由 ${settings.developer || 'AuR3L1US'} 开发。名字、性格、说话方式等在「人设」页设置。`;
+  const lv = settings.group_activity || 'normal';
+  $('#g-activity').innerHTML = LEVELS.map(([v, t]) => `<button data-v="${v}" class="${v === lv ? 'on' : ''}">${t}</button>`).join('');
+  const m = await api('/api/memes');
+  $('#g-memes').textContent = m.count ? `已收集 ${m.count} 张表情包，常见标签：${m.tags.map(x => x.tag).join('、')}` : '还没收集到表情包';
+}
+$('#g-toggles').onchange = async e => {
+  const k = e.target.dataset.g; if (!k) return;
+  settings = await api('/api/settings', {[k]: e.target.checked}); toast('已保存');
+};
+$('#a-friend').onchange = async e => { settings = await api('/api/settings', {auto_accept_friend: e.target.checked}); toast('已保存'); };
+$('#g-activity').onclick = async e => {
+  const v = e.target.dataset.v; if (!v) return;
+  for (const x of $('#g-activity').children) x.classList.toggle('on', x === e.target);
+  settings = await api('/api/settings', {group_activity: v}); toast('已保存');
+};
+
+
+// conversations
+async function loadChats() {
+  logData = await api('/api/log');
+  settings = logData.settings || settings;
+  renderList();
+  if (current) renderChat();
+}
+function chatNames() {
+  const names = new Map();
+  for (const c of logData.chats || []) names.set(c.name, {name:c.name, group:!!c.group, preview:c.preview});
+  for (const e of logData.entries || []) if (e.chat && !names.has(e.chat)) names.set(e.chat, {name:e.chat, group:!!e.group, preview:e.text});
+  return [...names.values()];
+}
+function renderList() {
+  const q = $('#c-search').value.trim().toLowerCase();
+  const all = chatNames().filter(c => !q || c.name.toLowerCase().includes(q));
+  const custom = (settings.chats || {});
+  const sec = (title, arr) => arr.length ? `<div class="sec">${title} · ${arr.length}</div>` + arr.map(c =>
+    `<div class="item ${current === c.name ? 'on' : ''}" data-name="${esc(c.name)}"><div class="av-s"><svg class="i"><use href="#i-${c.group ? 'users' : 'user'}"/></svg></div><div class="tx"><div class="nm">${esc(c.name)}</div><div class="pv">${esc(c.preview || '')}</div></div>${chatTag(c, custom[c.name])}</div>`).join('') : '';
+  $('#c-list').innerHTML = sec('私聊', all.filter(c => !c.group)) + sec('群聊', all.filter(c => c.group)) || '<div class="empty">还没有对话</div>';
+}
+$('#c-search').oninput = renderList;
+$('#c-list').onclick = e => {
+  const it = e.target.closest('.item'); if (!it) return;
+  current = it.dataset.name; renderList(); renderChat();
+};
+function fmt(ts) { const d = new Date(ts * 1000); const p = n => String(n).padStart(2, '0'); return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`; }
+function renderChat() {
+  const c = chatNames().find(x => x.name === current) || {name: current, group: false};
+  $('#c-title').textContent = c.name;
+  $('#c-tag').innerHTML = `<span class="tag">${c.group ? '群聊' : '私聊'}</span>`;
+  const entries = (logData.entries || []).filter(e => e.chat === current).slice().reverse();
+  $('#c-count').textContent = entries.length + ' 条';
+  const box = $('#c-msgs'); const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
+  box.innerHTML = entries.length ? entries.map(e => {
+    let out = `<div class="m"><div class="who">${esc(e.sender || '')}</div><div class="bub">${esc(e.text || '')}</div><div class="meta">${fmt(e.time)}</div></div>`;
+    if (e.reply) {
+      const st = e.error ? '出错' : e.sent ? '已发送' : e.dry_run ? '仅预览' : '';
+      out += `<div class="m me"><div class="bub">${esc(e.reply)}</div><div class="meta">${st} ${fmt(e.time)}</div></div>`;
+    } else if (e.judged) {
+      out += `<div class="m me"><div class="meta">判断与自己无关，没回</div></div>`;
+    }
+    return out;
+  }).join('') : '<div class="empty">最近的日志里没有这个对话的消息</div>';
+  if (atBottom) box.scrollTop = box.scrollHeight;
+  const typing = document.activeElement && document.activeElement.closest && document.activeElement.closest('#c-side textarea');
+  if (!typing) renderSide(c);
+}
+function triSeg(key, val, opts) {
+  return `<div class="seg" data-k="${key}">` + opts.map(([v, t]) => `<button data-v="${v}" class="${String(val) === String(v) ? 'on' : ''}">${t}</button>`).join('') + '</div>';
+}
+function renderSide(c) {
+  const o = (settings.chats || {})[c.name] || {};
+  const tri = k => o[k] === undefined ? 'inherit' : String(o[k]);
+  const g = (k, d) => on(settings, k) ? '开' : '关';
+  const yesNo = k => [['inherit', `跟随全局（${g(k)}）`], ['true', '开'], ['false', '关']];
+  const lvName = Object.fromEntries(LEVELS)[settings.group_activity || 'normal'];
+  const active = chatActive(c, o);
+  const src = o.enabled === undefined ? `跟随全局设置（全局${on(settings, 'enabled') ? '已开启' : '已关闭'}）` : '这个对话单独设置的';
+  let h = `<h3>单独设置</h3><div class="muted">只对「${esc(c.name)}」生效</div>`;
+  h += `<div class="bigswitch ${active ? 'on' : ''}"><div style="flex:1"><div class="t">在这个对话启用机器人</div><div class="muted">${src}${o.enabled !== undefined ? ' · <button class="link" id="cs-inherit">改回跟随全局</button>' : ''}</div></div>${sw(o.enabled === undefined ? on(settings, 'enabled') : o.enabled, 'id="cs-enabled"')}</div>`;
+  if (o.enabled === true && !on(settings, 'enabled')) h += `<div class="muted" style="margin-top:8px">全局关着，但这个对话会单独回复。</div>`;
+  if (!c.group && !on(settings, 'reply_private')) h += `<div class="muted" style="margin-top:8px;color:var(--amber)">注意：全局「私聊自动回复」是关的，私聊不会回复。</div>`;
+  if (c.group) {
+    h += `<div class="opt"><div class="t">什么时候回</div>${triSeg('group_reply', o.group_reply || 'inherit', [['inherit','跟随全局'],['at','只在被 @ 时'],['smart','@ + 智能接话']])}</div>`;
+    h += `<div class="opt"><div class="t">积极性</div>${triSeg('group_activity', o.group_activity || 'inherit', [['inherit', `全局(${lvName})`], ...LEVELS])}</div>`;
+  }
+  h += `<div class="opt"><div class="t">发表情包</div>${triSeg('use_meme', tri('use_meme'), yesNo('use_meme'))}</div>`;
+  h += `<div class="opt"><div class="t">自主学习</div>${triSeg('learn', tri('learn'), yesNo('learn'))}</div>`;
+  h += `<div class="opt" style="border:0"><div class="t">专属人设</div><div class="muted">留空就用全局人设</div><textarea id="cs-persona" style="margin-top:6px" placeholder="例如：在这个群里说话更正式一点">${esc(o.persona || '')}</textarea>
+        <div class="row" style="margin-top:8px"><button class="btn primary" id="cs-save-persona">保存人设</button>${Object.keys(o).length ? '<button class="btn danger" id="cs-reset">全部恢复全局</button>' : ''}</div></div>`;
+  $('#c-side').innerHTML = h;
+}
+function current_is_group() { return !!(chatNames().find(x => x.name === current) || {}).group; }
+function chatActive(c, o) {
+  const en = o && o.enabled !== undefined ? o.enabled : on(settings, 'enabled');
+  return en && (c.group ? true : on(settings, 'reply_private'));
+}
+function chatTag(c, o) {
+  // Every chat shows what is in effect; a dot marks chats with their own settings.
+  const own = o && Object.keys(o).length ? ' own' : '';
+  const tip = own ? ' title="这个对话有单独设置"' : '';
+  return chatActive(c, o || {}) ? `<span class="tag g${own}"${tip}>已开启</span>` : `<span class="tag off${own}"${tip}>已关闭</span>`;
+}
+async function saveChat(patch) {
+  const o = {...((settings.chats || {})[current] || {}), ...patch};
+  for (const k of Object.keys(o)) if (o[k] === null || o[k] === '') delete o[k];
+  const before = settings;
+  settings = {...settings, chats: {...(settings.chats || {}), [current]: o}};
+  renderList();  // the list updates at once; the panel re-renders after its animation
+  try {
+    settings = await api('/api/chat-settings', {name: current, settings: o});
+    toast('已保存');
+  } catch (e) { settings = before; toast('保存失败：' + e.message); }
+  setTimeout(() => { renderList(); renderChat(); }, 220);
+}
+$('#c-side').onchange = async e => {
+  if (e.target.id === 'cs-enabled') {
+    e.target.closest('.bigswitch').classList.toggle('on', e.target.checked && (current_is_group() || on(settings, 'reply_private')));
+    await saveChat({enabled: e.target.checked});
+  }
+};
+$('#c-side').onclick = async e => {
+  if (e.target.id === 'cs-inherit') return saveChat({enabled: null});
+  const b = e.target.closest('.seg button');
+  if (b) {
+    for (const x of b.parentElement.children) x.classList.toggle('on', x === b);
+    const k = b.parentElement.dataset.k, v = b.dataset.v;
+    await saveChat({[k]: v === 'inherit' ? null : v === 'true' ? true : v === 'false' ? false : v});
+  } else if (e.target.id === 'cs-save-persona') {
+    await saveChat({persona: $('#cs-persona').value.trim() || null});
+  } else if (e.target.id === 'cs-reset') {
+    if (!confirm('这个对话的单独设置全部清空，恢复跟随全局？')) return;
+    settings = await api('/api/chat-settings', {name: current, settings: null}); toast('已恢复全局'); renderList(); renderChat();
+  }
+};
+
+// model
+let models = [], prov = null;
+const P = id => (llm.providers || []).find(p => p.id === id) || {};
+async function loadModel() {
+  llm = await api('/api/llm');
+  $('#m-pill').textContent = llm.configured ? '已配置' : '未填写'; $('#m-pill').classList.toggle('on', !!llm.configured);
+  $('#warn-model').classList.toggle('hidden', !!llm.configured);
+  if (!prov || !$('#m-providers').children.length) selectProvider(llm.provider, true);
+}
+function selectProvider(id, initial) {
+  prov = id; const p = P(id); const saved = id === llm.provider;
+  $('#m-providers').innerHTML = (llm.providers || []).map(x => `<button class="prov ${x.id === id ? 'on' : ''}" data-p="${x.id}"><b>${esc(x.name)}${x.id === llm.provider ? ' ✓' : ''}</b><span>${esc(x.note || (x.vision ? '能聊天、能看图' : '能聊天'))}</span></button>`).join('');
+  $('#m-key').disabled = !!p.no_key;
+  $('#m-key').placeholder = p.no_key ? '这个平台不需要 Key' : (saved && llm.key_hint ? `已保存 ${llm.key_hint}，不改就留空` : '粘贴 API Key');
+  $('#m-hint').innerHTML = p.key_url ? `还没有 Key？到 <a href="${esc(p.key_url)}" target="_blank" rel="noopener">${esc(p.name)}控制台</a> 创建一个。` : '';
+  const needBase = id === 'custom' || id === 'ollama';
+  const base = saved ? llm.base_url : p.base_url;
+  $('#m-base').value = base || '';
+  $('#m-base-box').classList.toggle('hidden', !needBase && !$('#m-adv').open);
+  $('#m-model').value = saved ? llm.model : (p.model || '');
+  $('#m-vision').value = saved ? (llm.vision_model || '') : (p.vision || '');
+  models = []; fillModels();
+  if (!initial) $('#m-err').textContent = '';
+}
+$('#m-adv').addEventListener('toggle', () => { const n = prov === 'custom' || prov === 'ollama'; $('#m-base-box').classList.toggle('hidden', !n && !$('#m-adv').open); });
+$('#m-providers').onclick = e => { const b = e.target.closest('.prov'); if (b) selectProvider(b.dataset.p); };
+function fillModels() { $('#m-models').innerHTML = models.map(m => `<option value="${esc(m)}">`).join(''); }
+$('#m-test').onclick = async () => {
+  $('#m-err').textContent = '正在测试…';
+  try {
+    const r = await api('/api/llm/test', {api_key: $('#m-key').value, base_url: $('#m-base').value});
+    if (!r.ok) { $('#m-err').textContent = r.error; return; }
+    models = r.models.filter(m => !/embed|rerank|tts|whisper|speech|audio|image-|video|flux|kolors|wan2|bge|stable-diffusion/i.test(m));
+    $('#m-err').innerHTML = `<span class="ok">可以用 ✓ 共 ${models.length} 个模型，点“聊天模型”输入框可以选</span>`; fillModels();
+  } catch (e) { $('#m-err').textContent = e.message; }
+};
+$('#m-save').onclick = async () => {
+  $('#m-err').textContent = '';
+  try {
+    llm = await api('/api/llm', {provider: prov, api_key: $('#m-key').value, base_url: $('#m-base').value, model: $('#m-model').value.trim(), vision_model: $('#m-vision').value.trim()});
+    $('#m-key').value = ''; toast('已保存，机器人下一条消息就用新设置'); prov = null; loadModel();
+  } catch (e) { $('#m-err').textContent = e.message; }
+};
+$('#p-save').onclick = async () => {
+  $('#p-err').textContent = '';
+  if ($('#p-new').value !== $('#p-new2').value) { $('#p-err').textContent = '两次输入的新密码不一样'; return; }
+  try { await api('/api/password', {old: $('#p-old').value, new: $('#p-new').value}); $('#p-old').value = $('#p-new').value = $('#p-new2').value = ''; toast('密码已修改'); }
+  catch (e) { $('#p-err').textContent = e.message; }
+};
+
+// stickers
+let sk = {named: [], collected: []}, skTab = 'collected', skEditing = null;
+const stickerBusy = () => skEditing !== null || !!(document.activeElement && document.activeElement.closest && document.activeElement.closest('#sk-grid input'));
+async function loadStickers() {
+  sk = await api('/api/stickers');
+  $('#sk-n1').textContent = sk.collected.length; $('#sk-n2').textContent = sk.named.length;
+  const chats = [...new Set(sk.collected.map(i => i.chat).filter(Boolean))];
+  const cur = $('#sk-chat').value;
+  $('#sk-chat').innerHTML = '<option value="">全部群</option>' + chats.map(c => `<option ${c === cur ? 'selected' : ''}>${esc(c)}</option>`).join('');
+  renderStickers();
+}
+function collectedCard(i) {
+  const editing = skEditing === i.md5;
+  const body = editing
+    ? `<div class="edit-row"><input data-f="tags" value="${esc(i.tags.join(' '))}" placeholder="标签，用空格分开"></div>
+       <div class="edit-row"><input data-f="note" value="${esc(i.note)}" placeholder="什么时候用（可选）"></div>
+       <div class="acts"><button class="btn primary mini" data-a="save">保存</button><button class="btn mini" data-a="cancel">取消</button></div>`
+    : `<div class="chips">${i.tags.length ? i.tags.map(t => `<span class="chip">${esc(t)}</span>`).join('') : '<span class="muted">还没有标签</span>'}</div>
+       ${i.note ? `<div class="muted">${esc(i.note)}</div>` : ''}
+       <div class="muted">${esc(i.chat || '')} · 用过 ${i.uses} 次</div>
+       <div class="acts">
+         <button class="btn mini" data-a="edit">改标签</button>
+         <button class="btn mini" data-a="share">${i.shared ? '只在本群' : '所有群可用'}</button>
+         <button class="btn mini" data-a="toggle">${i.disabled ? '启用' : '停用'}</button>
+         <button class="btn mini danger" data-a="del">删除</button>
+       </div>`;
+  return `<div class="st ${i.disabled ? 'off' : ''}" data-md5="${esc(i.md5)}">
+    <div class="pic"><img loading="lazy" src="${esc(i.url)}" alt="">${i.shared ? '<span class="tag g badge">所有群可用</span>' : ''}${i.disabled ? '<span class="tag badge">已停用</span>' : ''}</div>
+    <div class="b">${body}</div></div>`;
+}
+function renderStickers() {
+  const q = $('#sk-search').value.trim();
+  $('#sk-chat').classList.toggle('hidden', skTab !== 'collected');
+  if (skTab === 'collected') {
+    $('#sk-intro').textContent = '机器人从群里收集的表情包，默认只在收集它的那个群里用；点“所有群可用”后别的群也能用。';
+    const chat = $('#sk-chat').value;
+    const list = sk.collected.filter(i => (!chat || i.chat === chat) && (!q || i.tags.join(' ').includes(q) || i.note.includes(q)));
+    $('#sk-grid').innerHTML = list.length ? list.map(collectedCard).join('')
+      : '<div class="empty" style="grid-column:1/-1">还没有收集到表情包。打开「偷表情包」后，群里有人发表情就会自动收集。</div>';
+  } else {
+    $('#sk-intro').textContent = '有名字的表情包，AI 可以按名字直接发（例如“干饭”“比心”）。自带的可以停用，也可以上传你自己的。';
+    const list = sk.named.filter(i => !q || i.name.includes(q));
+    $('#sk-grid').innerHTML = `<div class="st upload">
+        <label class="pic" for="sk-file"><svg class="i"><use href="#i-upload"/></svg><span id="sk-file-name">点这里选图片</span></label>
+        <input type="file" id="sk-file" accept="image/png,image/jpeg,image/gif,image/webp" class="hidden">
+        <input type="text" id="sk-name" placeholder="名称，比如：摸鱼" maxlength="8">
+        <button class="btn primary mini" id="sk-upload">上传</button>
+      </div>` + list.map(i => `<div class="st ${i.disabled ? 'off' : ''}" data-name="${esc(i.name)}">
+        <div class="pic"><img loading="lazy" src="${esc(i.url)}" alt=""><span class="tag badge ${i.kind === 'custom' ? 'g' : ''}">${i.kind === 'custom' ? '上传的' : '自带'}</span></div>
+        <div class="b"><div class="row"><span class="nm" style="flex:1">${esc(i.name)}</span>${sw(!i.disabled, 'data-a="ntoggle"')}</div>
+          ${i.kind === 'custom' ? '<div class="acts"><button class="btn mini danger" data-a="ndel">删除</button></div>' : ''}</div></div>`).join('');
+  }
+}
+$('#sk-tabs').onclick = e => {
+  const b = e.target.closest('button'); if (!b) return;
+  for (const x of $('#sk-tabs').children) x.classList.toggle('on', x === b);
+  skTab = b.dataset.v; skEditing = null; renderStickers();
+};
+$('#sk-search').oninput = renderStickers;
+$('#sk-chat').onchange = renderStickers;
+$('#sk-grid').onchange = async e => {
+  if (e.target.id === 'sk-file') {
+    const f = e.target.files[0];
+    $('#sk-file-name').textContent = f ? f.name : '点这里选图片';
+    if (f && !$('#sk-name').value) $('#sk-name').value = f.name.replace(/\.[^.]+$/, '').slice(0, 8);
+    return;
+  }
+  if (e.target.dataset.a === 'ntoggle') {
+    const card = e.target.closest('.st');
+    card.classList.toggle('off', !e.target.checked);
+    try { await api('/api/stickers/named/toggle', {name: card.dataset.name, disabled: !e.target.checked}); toast(e.target.checked ? '已启用' : '已停用'); }
+    catch (err) { toast(err.message); }
+    setTimeout(loadStickers, 220);
+  }
+};
+$('#sk-grid').onclick = async e => {
+  const b = e.target.closest('button[data-a], #sk-upload'); if (!b) return;
+  const card = b.closest('.st');
+  try {
+    if (b.id === 'sk-upload') {
+      const f = $('#sk-file').files[0]; if (!f) return toast('先选一张图片');
+      if (f.size > 2 * 1024 * 1024) return toast('图片太大（最大 2 MB）');
+      const data = await new Promise((ok, no) => { const r = new FileReader(); r.onload = () => ok(r.result); r.onerror = no; r.readAsDataURL(f); });
+      await api('/api/stickers/named/upload', {name: $('#sk-name').value, data}); toast('已上传');
+    } else if (b.dataset.a === 'ndel') {
+      if (!confirm('删除这个上传的表情包？')) return;
+      await api('/api/stickers/named/delete', {name: card.dataset.name}); toast('已删除');
+    } else {
+      const md5 = card.dataset.md5, item = sk.collected.find(i => i.md5 === md5);
+      if (b.dataset.a === 'edit') { skEditing = md5; renderStickers(); $(`#sk-grid [data-md5="${md5}"] input`)?.focus(); return; }
+      if (b.dataset.a === 'cancel') { skEditing = null; renderStickers(); return; }
+      if (b.dataset.a === 'save') {
+        const tags = card.querySelector('[data-f=tags]').value.split(/[\s,，、]+/).filter(Boolean);
+        await api('/api/stickers/collected', {md5, tags, note: card.querySelector('[data-f=note]').value});
+        skEditing = null; toast('已保存');
+      }
+      if (b.dataset.a === 'share') { await api('/api/stickers/collected', {md5, shared: !item.shared}); toast(item.shared ? '改为只在本群用' : '所有群都能用了'); }
+      if (b.dataset.a === 'toggle') { await api('/api/stickers/collected', {md5, disabled: !item.disabled}); toast(item.disabled ? '已启用' : '已停用'); }
+      if (b.dataset.a === 'del') {
+        if (!confirm('删除这个表情包？删除后不能恢复。')) return;
+        await api('/api/stickers/collected/delete', {md5}); toast('已删除');
+      }
+    }
+    await loadStickers();
+  } catch (err) { toast(err.message); }
+};
+
+// persona
+const PF = ['name', 'developer', 'identity', 'personality', 'style', 'catchphrases', 'likes', 'avoid', 'extra'];
+const PF_CHIPS = {
+  'pf-personality': ['随和', '真诚', '幽默', '毒舌但不刻薄', '温柔', '高冷', '元气满满', '爱吐槽', '靠谱', '有点傲娇'],
+  'pf-style': ['口语化', '一般一两句话', '偶尔用 emoji', '不用列表和 Markdown', '爱接梗', '说话简洁', '语气轻松'],
+};
+let persona = null, personaDirty = false;
+function pfGet() { const o = {}; for (const k of PF) o[k] = $('#pf-' + k).value.trim(); return o; }
+function pfSet(p) { for (const k of PF) $('#pf-' + k).value = p[k] || ''; pfPreview(); }
+function pfCompose(p) {
+  const out = [`你叫"${p.name || '小克'}"，是由 ${p.developer || 'AuR3L1US'} 开发的${p.identity || '微信聊天助手'}。`];
+  for (const [k, label] of [['personality', '性格'], ['style', '说话方式'], ['catchphrases', '口头禅（偶尔自然地用，别每句都用）'], ['likes', '兴趣和喜好'], ['avoid', '不要做的事']])
+    if (p[k]) out.push(`${label}：${p[k]}。`.replace('。。', '。'));
+  if (p.extra) out.push(p.extra);
+  return out.join('\n');
+}
+function pfPreview() { $('#pf-preview').textContent = pfCompose(pfGet()); }
+async function loadPersona() {
+  persona = await api('/api/persona');
+  pfSet(persona.profile);
+  $('#pf-intro').value = persona.intro || '';
+  $('#pf-old').classList.toggle('hidden', !persona.custom_text);
+  $('#pf-old-text').textContent = persona.custom_text ? `「${persona.custom_text}」保存新人设后会被替换。下面已经按小克预设填好，可以照着改。` : '';
+  for (const box of document.querySelectorAll('.pf-chips')) {
+    box.innerHTML = PF_CHIPS[box.dataset.for].map(c => `<span class="chip" data-c="${esc(c)}">+ ${esc(c)}</span>`).join('');
+  }
+  personaDirty = false;
+}
+document.querySelector('[data-page=persona]').addEventListener('input', () => { personaDirty = true; pfPreview(); });
+document.querySelector('[data-page=persona]').addEventListener('click', e => {
+  const c = e.target.closest('.pf-chips .chip'); if (!c) return;
+  const box = $('#' + c.parentElement.dataset.for);
+  const cur = box.value.trim();
+  if (!cur.includes(c.dataset.c)) box.value = cur ? cur.replace(/[。，、,\s]+$/, '') + '、' + c.dataset.c : c.dataset.c;
+  personaDirty = true; pfPreview();
+});
+$('#pf-preset').onclick = () => {
+  if (!confirm('把名字、性格等都恢复成小克的预设？（保存后才生效）')) return;
+  pfSet(persona.preset); personaDirty = true; toast('已填入小克预设，记得保存');
+};
+$('#pf-save').onclick = async () => {
+  $('#pf-err').textContent = '';
+  try {
+    persona = await api('/api/persona', {profile: pfGet(), intro: $('#pf-intro').value});
+    personaDirty = false; $('#pf-old').classList.add('hidden'); toast('人设已保存，下一条消息就生效');
+  } catch (e) { $('#pf-err').textContent = e.message; }
+};
+
+boot().catch(() => showLogin());
+</script>
+</body>
+</html>

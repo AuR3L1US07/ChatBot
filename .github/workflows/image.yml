@@ -1,0 +1,22 @@
+# Builds the bot image (with the official WeChat package) and publishes it to
+# ghcr.io/<owner>/chatbot, so install.sh can pull instead of building on the server.
+name: image
+on:
+  push:
+    branches: [main]
+    paths: ['wechat/Dockerfile', 'wechat/entrypoint.sh', '.github/workflows/image.yml']
+  schedule: [{cron: '0 3 * * 1'}]   # weekly: picks up new WeChat releases
+  workflow_dispatch:
+permissions: {contents: read, packages: write}
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sh wechat/fetch-wechat.sh
+      - uses: docker/login-action@v3
+        with: {registry: ghcr.io, username: '${{ github.actor }}', password: '${{ secrets.GITHUB_TOKEN }}'}
+      - id: name
+        run: echo "image=ghcr.io/$(echo '${{ github.repository_owner }}' | tr A-Z a-z)/chatbot:latest" >> "$GITHUB_OUTPUT"
+      - uses: docker/build-push-action@v6
+        with: {context: wechat, push: true, tags: '${{ steps.name.outputs.image }}'}

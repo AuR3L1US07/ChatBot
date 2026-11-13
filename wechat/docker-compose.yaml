@@ -1,0 +1,34 @@
+services:
+  wechat-linux:
+    build: .
+    image: ${CHATBOT_IMAGE:-wechat-linux:local}
+    container_name: wechat_linux
+    restart: unless-stopped
+    cap_drop: [ALL]
+    # Lets the launcher's gdb read the WeChat passphrase (confined to this container's PIDs).
+    cap_add: [SYS_PTRACE]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 760m
+    memswap_limit: 760m
+    pids_limit: 512
+    shm_size: 512m
+    # Chat only: hide the built-in mini-program / web engine (WeChatAppEx, a Chromium
+    # runtime of ~350 MB RAM) behind an empty folder. Remove this to bring it back.
+    tmpfs:
+      - /opt/wechat/RadiumWMPF:size=1m,mode=755
+    volumes:
+      - wechat_home:/home/wx
+      # Status agent (and later the light bot), mounted so it can change without a rebuild.
+      - ./entrypoint.sh:/entrypoint.sh:ro
+      - ./wxagent.py:/opt/wxagent/wxagent.py:ro
+      - ./admin.html:/opt/wxagent/admin.html:ro
+      - ./wxlauncher.py:/opt/wxagent/wxlauncher.py:ro
+      # Hot-swappable code (folder mount: edits are visible without a restart).
+      - ./hot:/opt/wxhot:ro
+    logging: {driver: json-file, options: {max-size: "10m", max-file: "3"}}
+    networks: [wxbot]
+volumes:
+  wechat_home:
+networks:
+  wxbot:
+    name: wxbot
