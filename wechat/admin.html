@@ -472,7 +472,7 @@ details summary{cursor:pointer;color:var(--muted);font-size:13px;margin-top:14px
           </div>
           <div class="card">
             <div class="ch"><svg class="i"><use href="#i-search"/></svg>联网搜索<span class="sp"></span><span class="pill on" id="s-pill">免费搜索</span></div>
-            <div class="muted">机器人遇到新闻、天气、比分、价格这类最新信息会自己上网查，普通闲聊不查。默认用必应搜索，免费、不用 Key；开关在「机器人设置」里。</div>
+            <div class="muted">机器人遇到新闻、天气、比分、价格这类最新信息会自己上网查，普通闲聊不查。默认用必应搜索，免费、不用 Key；默认关闭，在「机器人设置」里打开。</div>
             <label class="f">博查搜索 Key（可选）</label>
             <div class="row"><input id="s-key" type="password" autocomplete="off" placeholder="留空就用免费的必应搜索"><button class="btn" id="s-save">保存</button></div>
             <div class="muted" style="margin-top:6px">想要更稳定、带摘要的结果，可以到 <a href="https://open.bochaai.com" target="_blank" rel="noopener">博查开放平台</a> 申请 Key 填在这里（按次付费）。清空再保存就换回必应。</div>
@@ -614,13 +614,13 @@ const TOGGLES = [
   ['reply_private', '私聊自动回复', ''],
   ['reply_group_at', '群聊被 @ 时回复', ''],
   ['reply_group_smart', '群聊智能识别', '没被 @ 也看一眼群消息，判断和自己有关才接话'],
-  ['web_search', '联网搜索', '问到新闻、天气、价格等最新信息时自己上网查'],
+  ['web_search', '联网搜索', '问到新闻、天气、价格等最新信息时自己上网查（默认关闭）'],
   ['learn', '自主学习', '旁观聊天，记住每个群的说话风格、黑话和对每个人的印象'],
   ['steal_meme', '偷表情包', '把群友发的表情包存下来'],
   ['use_meme', '发表情包', '聊天时偶尔用表情包代替打字'],
 ];
 const LEVELS = [['quiet','安静'],['normal','均衡'],['active','活跃'],['chatty','话痨']];
-const DEFAULT_ON = {dry_run:true};  // same defaults as wxbot.py DEFAULT_SETTINGS
+const DEFAULT_ON = {dry_run:true, web_search:false};  // same defaults as wxbot.py DEFAULT_SETTINGS
 const on = (s, k) => s[k] === undefined ? (DEFAULT_ON[k] ?? true) : !!s[k];
 function sw(checked, attrs) { return `<label class="sw"><input type="checkbox" ${checked ? 'checked' : ''} ${attrs}><span></span></label>`; }
 async function loadSettings() {

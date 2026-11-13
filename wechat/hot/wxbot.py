@@ -150,6 +150,7 @@ DEFAULT_SETTINGS = {
     'steal_meme': True,  # keep the stickers people send (read from WeChat's own DB)
     'use_meme': True,  # let the bot answer with a stolen sticker now and then
     'auto_accept_friend': True,  # accept 好友申请 by clicking 通过 on 新的朋友
+    'web_search': False,  # let the model look things up online (turned on on the admin page)
     'persona': (
         '你叫"小克"，是由 AuR3L1US 开发的微信聊天助手。'
         '说话自然、随和，像真人朋友一样聊天，回复简短口语化，一般一两句话，'
@@ -1839,7 +1840,7 @@ def ask_llm(
         )
     week = '一二三四五六日'[time.localtime().tm_wday]
     system += f'\n\n现在是北京时间 {time.strftime("%Y年%m月%d日")} 星期{week} {time.strftime("%H:%M")}。'
-    search = settings.get('web_search', True)
+    search = settings.get('web_search', False)
     if search:
         system += (
             '\n\n联网搜索：你可以调用 web_search 查最新信息。被问到新闻、天气、比分、价格、'
