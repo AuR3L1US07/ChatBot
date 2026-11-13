@@ -93,17 +93,18 @@ curl -fsSL https://raw.githubusercontent.com/AuR3L1US07/ChatBot/main/install.sh 
 
 ```mermaid
 flowchart LR
-    U([群友 / 好友]) <-->|微信消息| W
-    subgraph C[Docker 容器]
-      W[官方 Linux 微信<br/>Xvfb 虚拟屏幕] -- 无障碍接口读消息 --> B[wxbot.py<br/>回复引擎]
-      B -- 键盘和剪贴板发消息 --> W
-      A[wxagent.py<br/>后台 API] <--> D[(~/.wxbot<br/>设置 · 记忆 · 表情包)]
+    U(["群友 / 好友"]) <-->|"微信消息"| W
+    subgraph C["Docker 容器"]
+      W["官方 Linux 微信<br/>Xvfb 虚拟屏幕"] -->|"无障碍接口读消息"| B["wxbot.py<br/>回复引擎"]
+      B -->|"键盘和剪贴板发消息"| W
+      A["wxagent.py<br/>后台 API"] <--> D[("数据目录 .wxbot<br/>设置 · 记忆 · 表情包")]
       B <--> D
     end
-    B <-->|OpenAI 兼容接口| L[大模型]
-    P[Caddy HTTPS :8443] --> A
-    P -->|登录后才能访问| V[noVNC 远程桌面] --> W
-    M([管理员浏览器]) --> P
+    B <-->|"OpenAI 兼容接口"| L["大模型"]
+    M(["管理员浏览器"]) --> P["Caddy HTTPS :8443"]
+    P --> A
+    P -->|"登录后才能访问"| V["noVNC 远程桌面"]
+    V --> W
 ```
 
 - **不 hook、不逆向协议**：容器里跑的是腾讯官方的 Linux 版微信，程序像真人一样“看屏幕、敲键盘”。
