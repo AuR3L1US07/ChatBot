@@ -143,10 +143,10 @@ main{padding:26px 28px 40px;max-width:1240px;width:100%;margin:0 auto}
 .list .s{padding:12px;border-bottom:1px solid var(--line)}
 .list .items{overflow:auto;flex:1;padding:6px 8px}
 .sec{font-size:12px;color:var(--muted);padding:10px 8px 4px;display:flex;align-items:center;gap:4px;border-radius:8px;user-select:none;cursor:grab}
-.sec .grip{width:14px;height:14px;fill:currentColor;opacity:0;margin-left:-4px;transition:opacity .15s}
-.list:hover .sec .grip,.sorting .sec .grip{opacity:.55}
-#c-list .item{user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;transition:box-shadow .15s,background .15s,transform .15s}
-#c-list .dragging{position:relative;z-index:2;background:#fff;box-shadow:0 10px 28px rgba(15,23,42,.16),0 0 0 1px rgba(7,193,96,.35);transform:scale(1.02);cursor:grabbing;border-radius:12px}
+#c-list .item,#c-list .grp{user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;touch-action:pan-y}
+#c-list .shift{transition:transform .18s cubic-bezier(.2,.7,.3,1)}
+#c-list .dragging{position:relative;z-index:3;background:#fff;box-shadow:0 12px 30px rgba(15,23,42,.16),0 0 0 1px rgba(7,193,96,.35);cursor:grabbing;border-radius:12px;transition:box-shadow .15s}
+#c-list .grp.dragging{background:#fff}
 #c-list .grp.dragging{padding-bottom:4px}
 .sorting,.sorting *{cursor:grabbing!important}
 .sorting .item:not(.dragging):hover{background:transparent}
@@ -780,74 +780,91 @@ function saveOrder() {
     try { settings = await api('/api/settings', {chat_order: o}); toast('顺序已保存'); } catch (e) { toast('保存顺序失败：' + e.message); }
   }, 300);
 }
-const drag = {el: null, timer: null, x: 0, y: 0, moved: false, justDropped: 0, scroll: 0};
+// Long-press, then drag: the picked row follows the pointer 1:1 while the rows it passes
+// slide out of its way; the list itself is only reordered once, on release.
+const drag = {el: null, timer: null, x: 0, y: 0, justDropped: 0, raf: 0};
 function dragTarget(e) {
   if ($('#c-search').value.trim()) return null;  // the order is ambiguous while filtering
   const sec = e.target.closest('#c-list .sec');
   if (sec) return sec.closest('.grp');
   return e.target.closest('#c-list .item');
 }
+function startDrag(el, e) {
+  const list = $('#c-list');
+  const kind = el.classList.contains('grp') ? 'grp' : 'item';
+  const sibs = [...el.parentElement.children].filter(n => n.classList.contains(kind));
+  const rects = sibs.map(n => n.getBoundingClientRect());
+  const i0 = sibs.indexOf(el);
+  // Space one row takes up, including the gap to the next one.
+  const gap = sibs.length > 1 ? Math.max(0, rects[1].top - rects[0].bottom) : 0;
+  Object.assign(drag, {el, list, sibs, rects, i0, to: i0, slot: rects[i0].height + gap,
+    startY: e.clientY, y: e.clientY, scroll0: list.scrollTop});
+  el.classList.add('dragging'); list.classList.add('sorting');
+  for (const n of sibs) if (n !== el) n.classList.add('shift');
+  try { list.setPointerCapture(e.pointerId); } catch (_) {}
+  if (navigator.vibrate) navigator.vibrate(15);
+  frame();
+}
+function frame() {
+  if (!drag.el) return;
+  const {list, sibs, rects, i0, slot} = drag;
+  // Auto-scroll while the pointer sits near the list's top or bottom edge.
+  const r = list.getBoundingClientRect();
+  const edge = drag.y < r.top + 36 ? -(r.top + 36 - drag.y) : drag.y > r.bottom - 36 ? drag.y - (r.bottom - 36) : 0;
+  if (edge) list.scrollTop += Math.max(-14, Math.min(14, edge / 3));
+  const dy = drag.y - drag.startY + (list.scrollTop - drag.scroll0);
+  drag.el.style.transform = `translateY(${dy}px)`;
+  // Where the pointer is (in the coordinates the rows had when the drag began) decides
+  // the new place - a tall section moves as soon as the pointer passes the other one.
+  const mid = drag.y + (list.scrollTop - drag.scroll0);
+  let to = 0;
+  sibs.forEach((n, i) => { if (i !== i0 && rects[i].top + rects[i].height / 2 < mid) to++; });
+  drag.to = to;
+  sibs.forEach((n, i) => {
+    if (i === i0) return;
+    const s = i > i0 && i <= to ? -slot : i < i0 && i >= to ? slot : 0;
+    n.style.transform = s ? `translateY(${s}px)` : '';
+  });
+  drag.raf = requestAnimationFrame(frame);
+}
 function endDrag(save) {
   clearTimeout(drag.timer); drag.timer = null;
-  cancelAnimationFrame(drag.scroll);
   if (!drag.el) return;
-  drag.el.classList.remove('dragging');
-  $('#c-list').classList.remove('sorting');
-  if (save && drag.moved) { saveOrder(); drag.justDropped = Date.now(); }
+  cancelAnimationFrame(drag.raf);
+  const {el, list, sibs, i0, to} = drag;
+  for (const n of sibs) { n.style.transform = ''; n.classList.remove('shift'); }
+  el.classList.remove('dragging'); list.classList.remove('sorting');
   drag.el = null;
+  if (save && to !== i0) {
+    const rest = sibs.filter(n => n !== el);
+    el.parentElement.insertBefore(el, rest[to] || rest[rest.length - 1].nextSibling);
+    saveOrder();
+  }
+  drag.justDropped = Date.now();
 }
 $('#c-list').addEventListener('pointerdown', e => {
-  if (e.button !== 0) return;
+  if (e.button !== 0 || drag.el) return;
   const t = dragTarget(e); if (!t) return;
-  drag.x = e.clientX; drag.y = e.clientY; drag.moved = false;
+  drag.x = e.clientX; drag.y = e.clientY;
   clearTimeout(drag.timer);
-  drag.timer = setTimeout(() => {
-    drag.el = t; t.classList.add('dragging'); $('#c-list').classList.add('sorting');
-    if (navigator.vibrate) navigator.vibrate(15);
-  }, 350);
+  drag.timer = setTimeout(() => { drag.timer = null; if (t.isConnected) startDrag(t, e); }, 300);
 });
 document.addEventListener('pointermove', e => {
-  if (!drag.el) {
-    if (drag.timer && Math.hypot(e.clientX - drag.x, e.clientY - drag.y) > 8) { clearTimeout(drag.timer); drag.timer = null; }
-    return;
-  }
-  e.preventDefault();
-  drag.y = e.clientY;
-  const el = drag.el, parent = el.parentElement;
-  const sibs = [...parent.children].filter(n => n !== el && n.classList.contains(el.classList.contains('grp') ? 'grp' : 'item'));
-  const before = sibs.find(n => { const r = n.getBoundingClientRect(); return e.clientY < r.top + r.height / 2; });
-  const next = before || null;
-  if (el.nextElementSibling !== next && !(next === null && el === parent.lastElementChild)) {
-    // FLIP: animate the siblings that shift.
-    const first = new Map(sibs.map(n => [n, n.getBoundingClientRect().top]));
-    parent.insertBefore(el, next);
-    for (const n of sibs) {
-      const dy = first.get(n) - n.getBoundingClientRect().top;
-      if (dy) n.animate([{transform: `translateY(${dy}px)`}, {transform: 'none'}], {duration: 160, easing: 'ease-out'});
-    }
-    drag.moved = true;
-  }
-  // Auto-scroll near the list's top and bottom edge.
-  cancelAnimationFrame(drag.scroll);
-  const box = $('#c-list'), r = box.getBoundingClientRect();
-  const step = () => {
-    const d = drag.y < r.top + 40 ? -8 : drag.y > r.bottom - 40 ? 8 : 0;
-    if (d && drag.el) { box.scrollTop += d; drag.scroll = requestAnimationFrame(step); }
-  };
-  drag.scroll = requestAnimationFrame(step);
+  if (drag.el) { drag.y = e.clientY; e.preventDefault(); return; }
+  if (drag.timer && Math.hypot(e.clientX - drag.x, e.clientY - drag.y) > 8) { clearTimeout(drag.timer); drag.timer = null; }
 }, {passive: false});
 document.addEventListener('pointerup', () => endDrag(true));
 document.addEventListener('pointercancel', () => endDrag(false));
 // While dragging on a touch screen the page must not scroll instead.
 document.addEventListener('touchmove', e => { if (drag.el) e.preventDefault(); }, {passive: false});
 $('#c-list').addEventListener('contextmenu', e => { if (drag.el || drag.timer) e.preventDefault(); });
+$('#c-list').addEventListener('dragstart', e => e.preventDefault());
 function renderList() {
   const q = $('#c-search').value.trim().toLowerCase();
   const all = chatNames().filter(c => !q || c.name.toLowerCase().includes(q));
   const custom = (settings.chats || {});
   const order = chatOrder();
-  const grip = '<svg class="grip" viewBox="0 0 24 24"><circle cx="9" cy="7" r="1.4"/><circle cx="15" cy="7" r="1.4"/><circle cx="9" cy="12" r="1.4"/><circle cx="15" cy="12" r="1.4"/><circle cx="9" cy="17" r="1.4"/><circle cx="15" cy="17" r="1.4"/></svg>';
-  const sec = (key, arr) => arr.length ? `<div class="grp" data-sec="${key}"><div class="sec">${grip}<span>${SECS[key]} · ${arr.length}</span></div>` + ordered(arr, order[key]).map(c =>
+  const sec = (key, arr) => arr.length ? `<div class="grp" data-sec="${key}"><div class="sec"><span>${SECS[key]} · ${arr.length}</span></div>` + ordered(arr, order[key]).map(c =>
     `<div class="item ${current === c.name ? 'on' : ''}" data-name="${esc(c.name)}"><div class="av-s"><svg class="i"><use href="#i-${c.group ? 'users' : 'user'}"/></svg></div><div class="tx"><div class="nm">${esc(c.name)}</div><div class="pv">${esc(c.preview || '')}</div></div>${chatTag(c, custom[c.name])}</div>`).join('') + '</div>' : '';
   if (drag.el) return;  // never redraw under a drag in progress
   $('#c-list').innerHTML = order.sections.map(k => sec(k, all.filter(c => (k === 'group') === !!c.group))).join('') || '<div class="empty">还没有对话</div>';
