@@ -955,7 +955,9 @@ def newest_is_ours(app, name: str) -> bool:
 # is the only thing drawn in the narrow strip left of the bubble (nicknames start further
 # right, our own rows have their avatar on the right).
 
-PAT_TAG = re.compile(r'\s*[\[［【]\s*拍一拍\s*[\]］】]\s*')
+# Models often put a name inside ("[拍一拍 小王]", "[拍了拍小王]"): accept that too so the
+# tag never leaks into the chat as text. The pat always goes to the person we answer.
+PAT_TAG = re.compile(r'\s*[\[［【]\s*拍(?:一|了)拍[^\[\]［］【】\n]{0,24}[\]］】]\s*')
 PAT_GAP = 600  # seconds between two pats from us in the same chat
 PAT_BACK_CHANCE = 0.6  # private chat: chance to pat back when patted
 AVATAR_STRIP = 80  # px from the row's left edge that hold only the avatar
@@ -1640,7 +1642,7 @@ def ask_llm(
             )
     if settings.get('pat_out', True):
         system += (
-            '\n\n拍一拍：你可以在消息末尾加 [拍一拍]，系统会在微信里拍一拍你正在回复的这个人。'
+            '\n\n拍一拍：你可以在消息末尾加 [拍一拍]（就这几个字，括号里不要写名字），系统会在微信里拍一拍你正在回复的这个人。'
             '偶尔用一下：打招呼、开玩笑逗对方、安慰人、对方拍了你想拍回去时；'
             '大约十几条才用一次，对方在问正经问题时不要用。'
         )
