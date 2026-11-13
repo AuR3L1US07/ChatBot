@@ -840,14 +840,18 @@ function endDrag(save) {
     el.parentElement.insertBefore(el, rest[to] || rest[rest.length - 1].nextSibling);
     saveOrder();
   }
-  drag.justDropped = Date.now();
+  drag.justDropped = Date.now();  // swallow the click the browser sends after the drag
+  if (save && Math.abs(drag.y - drag.startY) <= 4 && el.classList.contains('item')) {
+    // A press without moving is just a (slow) click: open that chat.
+    current = el.dataset.name; renderList(); renderChat();
+  }
 }
 $('#c-list').addEventListener('pointerdown', e => {
   if (e.button !== 0 || drag.el) return;
   const t = dragTarget(e); if (!t) return;
   drag.x = e.clientX; drag.y = e.clientY;
   clearTimeout(drag.timer);
-  drag.timer = setTimeout(() => { drag.timer = null; if (t.isConnected) startDrag(t, e); }, 300);
+  drag.timer = setTimeout(() => { drag.timer = null; if (t.isConnected) startDrag(t, e); }, 100);
 });
 document.addEventListener('pointermove', e => {
   if (drag.el) { drag.y = e.clientY; e.preventDefault(); return; }
