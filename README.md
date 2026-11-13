@@ -66,7 +66,7 @@
 
 <table>
 <tr>
-<td width="50%"><img src="docs/screenshots/dash.webp" alt="仪表盘"><p align="center"><sub>仪表盘：今天收到和回复了多少消息，以及最近 7 天的趋势</sub></p></td>
+<td width="50%"><img src="docs/screenshots/dash.webp" alt="仪表盘"><p align="center"><sub>仪表盘：今天的收发、最近 7 天趋势、服务器 CPU / 内存 / 磁盘，一键优化</sub></p></td>
 <td width="50%"><img src="docs/screenshots/chats.webp" alt="对话管理"><p align="center"><sub>对话管理：看每个对话的聊天记录，并单独设置</sub></p></td>
 </tr>
 <tr>
