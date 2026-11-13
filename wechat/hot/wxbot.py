@@ -389,18 +389,40 @@ def chat_list(app) -> list[dict]:
     for _node, raw, lines in _sessions(app):
         name = lines[0].strip()
         at = AT_MARK in raw
+        stamps = [x.strip() for x in lines[1:] if re.fullmatch(r'\d{1,2}:\d{2}', x.strip())]
         body = [x for x in lines[1:] if not re.fullmatch(r'\d{1,2}:\d{2}', x.strip())]
         joined = ' '.join(body)
         m = re.match(r'^\s*(?:\[\d+条\]\s*)?(?:\[有人@我\]\s*)?([^：:]{1,24})[：:]\s', joined)
+        unread = re.search(r'\[(\d+)条\]', joined)
+        preview = _clean_preview(joined)
+        sender = m.group(1).strip() if m else ''
         result.append({
             'name': name,
-            'preview': _clean_preview(joined),
+            'preview': preview,
             'raw': raw,
             'at': at,
             'group': at or bool(m),
-            'sender': m.group(1).strip() if m else '',
+            'sender': sender,
+            # What "something new arrived" is judged on: the preview alone misses a second
+            # [图片] / [动画表情] / "哈哈" in a row, so the sender, the time shown and the
+            # unread count take part too (see is_new).
+            'key': (sender, preview, stamps[-1] if stamps else '', int(unread.group(1)) if unread else 0),
         })
     return result
+
+
+def is_new(old, key) -> bool:
+    """Did this chat get a new message since `old` (a chat_list key)? A changed time
+    only counts while both are clock times: at midnight "17:57" turns into "昨天"."""
+    if not key[1]:
+        return False
+    if not isinstance(old, tuple):
+        return old != key[1]
+    if old[:2] != key[:2]:
+        return True
+    if old[2] != key[2] and old[2] and key[2]:
+        return True
+    return key[3] > old[3]
 
 
 _SYSTEM_MSG = re.compile(r'邀请你?加入|加入了群聊|撤回了一条消息|拍了拍|以上是打招呼|开启了朋友验证|修改群名|移出群聊')
@@ -1947,7 +1969,7 @@ def main() -> None:
             if listing != last_listing:
                 _write_json(CHATS, {'time': int(time.time()), 'chats': listing})
                 last_listing = listing
-            snapshot = {c['name']: c['preview'] for c in chats}
+            snapshot = {c['name']: c['key'] for c in chats}
             if not warmed:
                 # First pass only records the current state; never reply to backlog -
                 # except an @-mention of us that is not in the log yet: it arrived while
@@ -1963,7 +1985,7 @@ def main() -> None:
             for c in chats:
                 name, preview, at, group = c['name'], c['preview'], c['at'], c['group']
                 settings = chat_settings(base_settings, name)
-                if not preview or prev.get(name) == preview:
+                if not is_new(prev.get(name), c['key']):
                     continue
                 if _is_system(name):
                     continue
@@ -2002,7 +2024,14 @@ def main() -> None:
                         if interval is None and not talking:
                             continue  # 安静：只在被 @、被拍或正在聊的时候开口
                         if not talking and now - last_smart_at.get(name, 0) < (interval or 0):
-                            continue  # 刚判断过，别反复把这个群点成已读
+                            # 刚判断过，别反复把这个群点成已读 - but keep the chat "unseen"
+                            # so its newest message is judged once the interval is over
+                            # instead of being dropped for good.
+                            if name in prev:
+                                snapshot[name] = prev[name]
+                            else:
+                                snapshot.pop(name, None)
+                            continue
                         smart = True
                     else:
                         continue
