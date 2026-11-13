@@ -432,7 +432,19 @@ def llm_public() -> dict:
         'model': cfg.get('model') or DEFAULT_MODEL,
         'vision_model': cfg.get('vision_model', _PROVIDER[provider].get('vision', '')),
         'key_hint': ('…' + key[-4:]) if len(key) >= 8 else '',
+        'search_hint': ('…' + str(cfg.get('search_key'))[-4:]) if len(str(cfg.get('search_key') or '')) >= 8 else '',
     }
+
+
+def save_search_key(patch: dict) -> dict:
+    # Optional 博查 web-search key; empty = the free Bing search the bot uses by default.
+    cur = read_llm()
+    key = str(patch.get('search_key') or '').strip()
+    if key and (len(key) < 8 or len(key) > 200 or any(c.isspace() for c in key)):
+        raise ValueError('搜索 Key 格式不对')
+    cur['search_key'] = key
+    _write_private_json(_LLM_FILE, cur)
+    return llm_public()
 
 
 def list_models(base_url: str, api_key: str) -> list[str]:
@@ -920,6 +932,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(200, write_chat_settings(name, body.get('settings')))
             elif path == '/api/llm':
                 self._send(200, save_llm(body))
+            elif path == '/api/search-key':
+                self._send(200, save_search_key(body))
             elif path == '/api/persona':
                 self._send(200, save_persona(body))
             elif path == '/api/stickers/collected':

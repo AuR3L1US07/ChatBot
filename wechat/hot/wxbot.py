@@ -38,6 +38,7 @@ import sys
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 
 try:  # sticker theft lives in its own module; a broken import must not stop the bot
@@ -1627,6 +1628,13 @@ FALLBACK_TIMEOUT = 40
 
 
 def _chat_completion(messages: list[dict], max_tokens: int, temperature: float) -> str:
+    msg = _completion(messages, max_tokens, temperature)
+    reply = (msg.get('content') or '').strip()
+    return re.sub(r'<think>.*?</think>', '', reply, flags=re.S).strip()
+
+
+def _completion(messages: list[dict], max_tokens: int, temperature: float, tools: list | None = None) -> dict:
+    """One chat completion -> the reply message (dict), trying the fallback models."""
     cfg = json.loads(LLM_CFG.read_text())
     models = [cfg['model']] + [m for m in (cfg.get('fallback_models') or FALLBACK_MODELS) if m != cfg['model']]
     last_exc: Exception | None = None
@@ -1637,6 +1645,8 @@ def _chat_completion(messages: list[dict], max_tokens: int, temperature: float) 
             'max_tokens': max_tokens,
             'temperature': temperature,
         }
+        if tools:
+            body['tools'] = tools
         req = urllib.request.Request(
             cfg['base_url'].rstrip('/') + '/chat/completions',
             data=json.dumps(body).encode(),
@@ -1654,9 +1664,134 @@ def _chat_completion(messages: list[dict], max_tokens: int, temperature: float) 
             last_exc = exc
             log(f'model {model} failed: {type(exc).__name__}, trying next')
             continue
-        reply = (resp['choices'][0]['message'].get('content') or '').strip()
-        return re.sub(r'<think>.*?</think>', '', reply, flags=re.S).strip()
+        return resp['choices'][0]['message'] or {}
     raise last_exc or OSError('no model answered')
+
+
+# ───────────────────────── web search ─────────────────────────
+#
+# The model gets a web_search tool and decides itself when it needs it (news, weather,
+# scores, prices, anything recent). Results come from 博查 (api.bochaai.com) when a
+# search key is set on the admin page, else from Bing's China site, which needs no key
+# and answers from mainland servers.
+
+SEARCH_TOOL = [{
+    'type': 'function',
+    'function': {
+        'name': 'web_search',
+        'description': '联网搜索。问到新闻、天气、比分、价格、版本号、某人某事的最新情况、你不确定或可能过时的事实时调用；普通闲聊不要调用。',
+        'parameters': {
+            'type': 'object',
+            'properties': {'query': {'type': 'string', 'description': '搜索关键词，简短明确，需要时带上日期'}},
+            'required': ['query'],
+        },
+    },
+}]
+SEARCH_RESULTS = 6
+_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36'
+
+
+def _strip_html(s: str) -> str:
+    import html
+
+    return re.sub(r'\s+', ' ', html.unescape(re.sub(r'<[^>]+>', '', s or ''))).strip()
+
+
+def _search_bing(query: str) -> list[dict]:
+    url = 'https://cn.bing.com/search?' + urllib.parse.urlencode({'q': query, 'setlang': 'zh-CN', 'ensearch': '0'})
+    req = urllib.request.Request(url, headers={'User-Agent': _UA, 'Accept-Language': 'zh-CN,zh;q=0.9'})
+    page = urllib.request.urlopen(req, timeout=8).read().decode('utf-8', 'ignore')
+    out = []
+    for block in re.findall(r'<li class="b_algo"[^>]*>(.*?)</li>', page, flags=re.S):
+        a = re.search(r'<h2[^>]*>\s*<a[^>]*href="([^"]+)"[^>]*>(.*?)</a>', block, flags=re.S)
+        if not a:
+            continue
+        p = re.search(r'<p[^>]*>(.*?)</p>', block, flags=re.S) or re.search(
+            r'class="b_caption"[^>]*>(.*?)</div>', block, flags=re.S)
+        out.append({'title': _strip_html(a.group(2)), 'url': a.group(1), 'snippet': _strip_html(p.group(1) if p else '')[:300]})
+        if len(out) >= SEARCH_RESULTS:
+            break
+    return out
+
+
+def _search_bocha(query: str, key: str) -> list[dict]:
+    body = {'query': query, 'summary': True, 'count': SEARCH_RESULTS, 'freshness': 'noLimit'}
+    req = urllib.request.Request(
+        'https://api.bochaai.com/v1/web-search',
+        data=json.dumps(body).encode(),
+        headers={'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json'},
+    )
+    data = json.load(urllib.request.urlopen(req, timeout=10))
+    pages = (((data.get('data') or {}).get('webPages') or {}).get('value')) or []
+    return [
+        {
+            'title': p.get('name', ''),
+            'url': p.get('url', ''),
+            'snippet': (p.get('summary') or p.get('snippet') or '')[:400],
+            'date': (p.get('datePublished') or p.get('dateLastCrawled') or '')[:10],
+        }
+        for p in pages[:SEARCH_RESULTS]
+    ]
+
+
+def web_search(query: str) -> list[dict]:
+    try:
+        key = (json.loads(LLM_CFG.read_text()).get('search_key') or '').strip()
+    except (OSError, ValueError):
+        key = ''
+    if key:
+        try:
+            res = _search_bocha(query, key)
+            if res:
+                return res
+        except (urllib.error.URLError, TimeoutError, OSError, ValueError) as exc:
+            log(f'search: bocha failed ({type(exc).__name__}), using bing')
+    return _search_bing(query)
+
+
+def _format_results(query: str, results: list[dict]) -> str:
+    if not results:
+        return f'搜索「{query}」没有找到结果。'
+    lines = [f'搜索「{query}」的结果（{time.strftime("%Y-%m-%d")} 检索）：']
+    for i, r in enumerate(results, 1):
+        date = f"（{r['date']}）" if r.get('date') else ''
+        lines.append(f"{i}. {r['title']}{date}：{r['snippet']}")
+    return '\n'.join(lines)
+
+
+def _completion_with_search(messages: list[dict], max_tokens: int, temperature: float) -> str:
+    """Let the model call web_search (at most twice), then answer. A provider/model
+    without tool support simply gets the plain request."""
+    msgs = list(messages)
+    try:
+        msg = _completion(msgs, max_tokens, temperature, tools=SEARCH_TOOL)
+    except urllib.error.HTTPError as exc:
+        if exc.code == 401:
+            raise
+        log(f'search: tools not accepted (HTTP {exc.code}), answering without')
+        return _chat_completion(messages, max_tokens, temperature)
+    for _round in range(2):
+        calls = msg.get('tool_calls') or []
+        if not calls:
+            break
+        msgs.append({'role': 'assistant', 'content': msg.get('content') or '', 'tool_calls': calls})
+        for call in calls[:2]:
+            try:
+                query = json.loads(call['function'].get('arguments') or '{}').get('query') or ''
+            except (KeyError, ValueError, TypeError):
+                query = ''
+            try:
+                result = _format_results(query, web_search(query)) if query else '没有给出搜索词。'
+                log(f'search: {query[:40]}')
+            except (urllib.error.URLError, TimeoutError, OSError, ValueError) as exc:
+                result = f'搜索失败（{type(exc).__name__}），请根据已知信息回答，并说明可能不是最新的。'
+                log(f'search failed: {query[:40]} {type(exc).__name__}')
+            msgs.append({'role': 'tool', 'tool_call_id': call.get('id') or '', 'content': result})
+        for extra in calls[2:]:
+            msgs.append({'role': 'tool', 'tool_call_id': extra.get('id') or '', 'content': '（已省略）'})
+        msg = _completion(msgs, max_tokens, temperature, tools=SEARCH_TOOL if _round == 0 else None)
+    reply = (msg.get('content') or '').strip()
+    return re.sub(r'<think>.*?</think>', '', reply, flags=re.S).strip()
 
 
 def ask_llm(
@@ -1702,9 +1837,21 @@ def ask_llm(
             '偶尔用一下：打招呼、开玩笑逗对方、安慰人、对方拍了你想拍回去时；'
             '大约十几条才用一次，对方在问正经问题时不要用。'
         )
+    week = '一二三四五六日'[time.localtime().tm_wday]
+    system += f'\n\n现在是北京时间 {time.strftime("%Y年%m月%d日")} 星期{week} {time.strftime("%H:%M")}。'
+    search = settings.get('web_search', True)
+    if search:
+        system += (
+            '\n\n联网搜索：你可以调用 web_search 查最新信息。被问到新闻、天气、比分、价格、'
+            '版本、某人某事的近况，或你不确定、可能已经过时的事实时，先搜再答，别凭记忆瞎编；'
+            '搜到后用自己的话简短说重点，像朋友转述一样，不要贴一堆链接，也不要说"根据搜索结果"。'
+            '普通闲聊、玩梗、问你自己的事不要搜。'
+        )
     messages = [{'role': 'system', 'content': system}]
     for h in history[-CONTEXT_MESSAGES:]:
         messages.append({'role': h['role'], 'content': h['text'][:MAX_INPUT_CHARS]})
+    if search:
+        return _completion_with_search(messages, 300, 0.8)[:500]
     return _chat_completion(messages, 300, 0.8)[:500]
 
 
