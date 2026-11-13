@@ -62,7 +62,7 @@ GROUPS = STATE / 'groups.json'  # chats known to be groups
 CHATS = STATE / 'chats.json'  # current chat list, shown in the admin page sidebar
 STICKER_DIR = pathlib.Path(__file__).resolve().parent / 'stickers'  # <名称>.png, sent for [表情: 名称]
 CUSTOM_STICKER_DIR = pathlib.Path.home() / '.wxbot' / 'stickers'  # uploaded on the admin page
-STICKER_TAG = re.compile(r'\s*[\[［【]\s*表情\s*[:：]\s*([^\]］】]{1,8}?)\s*[\]］】]\s*')
+STICKER_TAG = re.compile(r'\s*[\[［【]\s*表情包?\s*[:：]\s*([^\]］】]{1,8}?)\s*[\]］】]\s*')
 STICKER_OWN_MARKS = ('[图片]', '图片', '[动画表情]', '动画表情')  # how our sent sticker shows up on screen
 
 POLL_SECONDS = 1
@@ -676,11 +676,36 @@ def sticker_catalog(limit: int = 18, chat: str = '', group: bool = True) -> list
     return out[:limit]
 
 
+# WeChat turns these "[名称]" into its own little emoji, so they may stay in the text.
+WECHAT_EMOJI = frozenset(
+    '微笑 撇嘴 色 发呆 得意 流泪 害羞 闭嘴 睡 大哭 尴尬 发怒 调皮 呲牙 惊讶 难过 囧 抓狂 吐 偷笑 愉快 白眼 '
+    '傲慢 困 惊恐 憨笑 悠闲 咒骂 疑问 嘘 晕 衰 骷髅 敲打 再见 擦汗 抠鼻 鼓掌 坏笑 右哼哼 左哼哼 鄙视 委屈 '
+    '快哭了 阴险 亲亲 可怜 笑脸 生病 脸红 破涕为笑 恐惧 失望 无语 嘿哈 捂脸 奸笑 机智 皱眉 耶 吃瓜 加油 汗 '
+    '天啊 Emm 社会社会 旺柴 好的 打脸 哇 翻白眼 666 让我看看 叹气 苦涩 裂开 嘴唇 爱心 心碎 拥抱 强 弱 握手 '
+    '胜利 抱拳 勾引 拳头 OK 合十 啤酒 咖啡 蛋糕 玫瑰 凋谢 菜刀 炸弹 便便 月亮 太阳 庆祝 礼物 红包 發 福 '
+    '烟花 爆竹 猪头 跳跳 发抖 转圈'.split()
+)
+# A bracketed word at the very end that is not a WeChat emoji: the model meant a sticker
+# but forgot the "表情:" part ("…有什么吩咐～[偷看]"). Never left in the text as is.
+_TRAILING_TAGS = re.compile(r'(?:\s*[\[［【]\s*[一-鿿]{1,6}\s*[\]］】])+\s*$')
+_ONE_TAG = re.compile(r'[\[［【]\s*([一-鿿]{1,6})\s*[\]］】]')
+
+
 def split_sticker(reply: str) -> tuple[str, str]:
     """-> (text without the sticker tag, requested name or '')."""
     found = STICKER_TAG.findall(reply or '')
     text = STICKER_TAG.sub(' ', reply or '').strip()
-    return text, (found[0].strip() if found else '')
+    wanted = found[0].strip() if found else ''
+    tail = _TRAILING_TAGS.search(text)
+    if tail:
+        keep = []
+        for name in _ONE_TAG.findall(tail.group(0)):
+            if name in WECHAT_EMOJI:
+                keep.append(f'[{name}]')
+            else:
+                wanted = wanted or name
+        text = (text[: tail.start()].rstrip() + ''.join(keep)).strip()
+    return text, wanted
 
 
 PRIVATE_STICKER_GAP = 240  # seconds; a friend gets at most one picture per 4 min
