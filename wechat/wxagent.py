@@ -487,6 +487,176 @@ def save_llm(patch: dict) -> dict:
     return llm_public()
 
 
+# ───────────────────────── server info & one-key cleanup ─────────────────────────
+
+_CPU_LAST: list = []  # [(total, idle)] from the previous /proc/stat read
+_CGROUP = pathlib.Path('/sys/fs/cgroup')
+_BOT_CMD = 'python3 /opt/wxhot/wxbot.py'
+
+
+def _cpu_times() -> tuple[int, int] | None:
+    try:
+        parts = pathlib.Path('/proc/stat').read_text().split('\n', 1)[0].split()[1:]
+        vals = [int(x) for x in parts]
+    except (OSError, ValueError):
+        return None
+    idle = vals[3] + (vals[4] if len(vals) > 4 else 0)
+    return sum(vals), idle
+
+
+def _cpu_percent() -> float | None:
+    now = _cpu_times()
+    if now is None:
+        return None
+    prev = _CPU_LAST[0] if _CPU_LAST else None
+    if prev is None:
+        time.sleep(0.4)
+        prev, now = now, _cpu_times() or now
+    _CPU_LAST[:] = [now]
+    total, idle = now[0] - prev[0], now[1] - prev[1]
+    return round(100 * (1 - idle / total), 1) if total > 0 else 0.0
+
+
+def _meminfo() -> dict:
+    out = {}
+    try:
+        for line in pathlib.Path('/proc/meminfo').read_text().splitlines():
+            k, v = line.split(':', 1)
+            out[k] = int(v.split()[0]) * 1024
+    except (OSError, ValueError):
+        pass
+    return out
+
+
+def _read_int(path: pathlib.Path) -> int | None:
+    try:
+        v = path.read_text().strip()
+        return None if v == 'max' else int(v)
+    except (OSError, ValueError):
+        return None
+
+
+def _procs() -> list[dict]:
+    """(name, rss) of the processes in this container, biggest first."""
+    out = []
+    for d in pathlib.Path('/proc').iterdir():
+        if not d.name.isdigit():
+            continue
+        try:
+            cmd = (d / 'cmdline').read_bytes().replace(b'\0', b' ').decode('utf-8', 'ignore').strip()
+            rss = 0
+            for line in (d / 'status').read_text().splitlines():
+                if line.startswith('VmRSS:'):
+                    rss = int(line.split()[1]) * 1024
+                    break
+        except (OSError, ValueError):
+            continue
+        if cmd and rss:
+            out.append({'cmd': cmd, 'rss': rss})
+    return sorted(out, key=lambda p: -p['rss'])
+
+
+def _proc_label(cmd: str) -> str:
+    base = cmd.split()[0].rsplit('/', 1)[-1]
+    if cmd.startswith(_BOT_CMD):
+        return '机器人'
+    if base == 'wechat':
+        return '微信'
+    if base in ('wxocr', 'wxplayer', 'wxutility', 'crashpad_handler'):
+        return '微信辅助进程'
+    if base in ('Xvfb', 'openbox'):
+        return '虚拟屏幕'
+    if 'wxagent.py' in cmd or 'wxlauncher.py' in cmd:
+        return '后台'
+    if 'websockify' in cmd or base == 'x11vnc':
+        return '远程桌面'
+    return '其他'
+
+
+def _uptime() -> int:
+    try:
+        return int(float(pathlib.Path('/proc/uptime').read_text().split()[0]))
+    except (OSError, ValueError):
+        return 0
+
+
+def system_info() -> dict:
+    mem = _meminfo()
+    try:
+        st = os.statvfs(str(HOME))
+        disk = {'total': st.f_blocks * st.f_frsize, 'used': (st.f_blocks - st.f_bfree) * st.f_frsize}
+    except OSError:
+        disk = {'total': 0, 'used': 0}
+    groups: dict[str, int] = {}
+    for p in _procs():
+        label = _proc_label(p['cmd'])
+        groups[label] = groups.get(label, 0) + p['rss']
+    try:
+        load = [float(x) for x in pathlib.Path('/proc/loadavg').read_text().split()[:3]]
+    except (OSError, ValueError):
+        load = []
+    return {
+        'cpu': _cpu_percent(),
+        'cores': os.cpu_count() or 1,
+        'load': load,
+        'mem': {'total': mem.get('MemTotal', 0), 'used': mem.get('MemTotal', 0) - mem.get('MemAvailable', 0)},
+        'swap': {'total': mem.get('SwapTotal', 0), 'used': mem.get('SwapTotal', 0) - mem.get('SwapFree', 0)},
+        'bot_mem': {'used': _read_int(_CGROUP / 'memory.current') or 0, 'limit': _read_int(_CGROUP / 'memory.max') or 0},
+        'disk': disk,
+        'uptime': _uptime(),
+        'procs': sorted(({'name': k, 'rss': v} for k, v in groups.items()), key=lambda x: -x['rss']),
+        'cleanable': sum(size for _path, size in _cleanable()),
+    }
+
+
+def _old_files(folder: pathlib.Path, days: float) -> list[tuple[pathlib.Path, int]]:
+    cutoff = time.time() - days * 86400
+    out = []
+    try:
+        for f in folder.rglob('*'):
+            try:
+                st = f.lstat()
+                if f.is_file() and not f.is_symlink() and st.st_mtime < cutoff:
+                    out.append((f, st.st_size))
+            except OSError:
+                continue
+    except OSError:
+        pass
+    return out
+
+
+def _cleanable() -> list[tuple[pathlib.Path, int]]:
+    """Files that are safe to delete: WeChat's own logs (older than a day), its crash
+    reports, image thumbnails it can fetch again (older than 3 days) and stale temp
+    files. Never chats, login data, stickers or the bot's settings and memory."""
+    files = _old_files(HOME / '.xwechat' / 'log', 1)
+    files += _old_files(HOME / '.xwechat' / 'crashinfo', 0)
+    for acc in (HOME / 'xwechat_files').glob('*'):
+        files += _old_files(acc / 'cache', 3)
+    files += [(f, s) for f, s in _old_files(pathlib.Path('/tmp'), 1) if f.parent == pathlib.Path('/tmp') and f.suffix in ('.png', '.jpg', '.py', '.txt', '.xwd')]
+    return files
+
+
+def optimize() -> dict:
+    freed = 0
+    removed = 0
+    for f, size in _cleanable():
+        try:
+            f.unlink()
+            freed += size
+            removed += 1
+        except OSError:
+            continue
+    # The bot slowly piles up memory (screenshots, image libraries); a restart gives it
+    # back. The launcher starts it again within a few seconds, and @-mentions that
+    # arrive meanwhile are still answered.
+    before = sum(p['rss'] for p in _procs() if p['cmd'].startswith(_BOT_CMD))
+    restarted = False
+    if before > 120 * 1024 * 1024:
+        _run('pkill', '-f', '^' + _BOT_CMD)
+        restarted = True
+    return {'files': removed, 'disk_freed': freed, 'bot_restarted': restarted, 'bot_mem_before': before}
+
 # ───────────────────────── admin login ─────────────────────────
 
 _ADMIN_FILE = HOME / '.wxbot' / 'admin.json'
@@ -864,6 +1034,7 @@ class Handler(BaseHTTPRequestHandler):
             '/api/settings': read_settings,
             '/api/memes': read_memes,
             '/api/stats': stats,
+            '/api/system': system_info,
             '/api/llm': llm_public,
             '/api/stickers': list_stickers,
             '/api/persona': persona_view,
@@ -932,6 +1103,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(200, write_chat_settings(name, body.get('settings')))
             elif path == '/api/llm':
                 self._send(200, save_llm(body))
+            elif path == '/api/optimize':
+                self._send(200, optimize())
             elif path == '/api/search-key':
                 self._send(200, save_search_key(body))
             elif path == '/api/persona':
