@@ -235,6 +235,40 @@ def append_log(entry: dict) -> None:
         pass
 
 
+def _norm(text: str) -> str:
+    return re.sub(r'\s+', '', text or '')
+
+
+def _unanswered_mentions(chats: list[dict], settings: dict) -> list[str]:
+    """Groups whose newest preview @-mentions us but never reached the log."""
+    me = '@' + bot_name(settings)
+    hits = [c for c in chats if c.get('group') and me in (c.get('preview') or '') and not _is_system(c['name'])]
+    if not hits:
+        return []
+    try:
+        with open(LOG, 'rb') as f:
+            f.seek(0, 2)
+            start = max(0, f.tell() - 512 * 1024)
+            f.seek(start)
+            tail = f.read().decode('utf-8', 'ignore').splitlines()[1 if start else 0:]
+    except OSError:
+        tail = []
+    seen: dict[str, list[str]] = {}
+    for line in tail[-2000:]:
+        try:
+            e = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(e, dict) and e.get('chat'):
+            seen.setdefault(e['chat'], []).append(_norm(e.get('text')))
+    out = []
+    for c in hits:
+        key = _norm(c['preview'])[:20]
+        if key and not any(key in t for t in seen.get(c['name'], [])):
+            out.append(c['name'])
+    return out
+
+
 # ───────────────────────── accessibility reading ─────────────────────────
 
 import pyatspi  # noqa: E402
@@ -1915,8 +1949,13 @@ def main() -> None:
                 last_listing = listing
             snapshot = {c['name']: c['preview'] for c in chats}
             if not warmed:
-                # First pass only records the current state; never reply to backlog.
+                # First pass only records the current state; never reply to backlog -
+                # except an @-mention of us that is not in the log yet: it arrived while
+                # the bot was restarting and would otherwise never be answered.
                 prev = snapshot
+                for name in _unanswered_mentions(chats, base_settings):
+                    prev.pop(name, None)
+                    log(f'answering @ from {name} that arrived during restart')
                 warmed = True
                 continue
             if settings.get('auto_accept_friend', True):
