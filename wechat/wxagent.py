@@ -736,6 +736,7 @@ PERSONA_PRESET = {
     'name': '小克',
     'developer': 'AuR3L1US',
     'identity': '微信聊天助手',
+    'appearance': '橙色长发、头戴橙色花朵和黑色蝴蝶结、穿白色花边裙的 Q 版二次元女孩，内置表情包画的就是你自己',
     'personality': '随和、真诚、有点小幽默，乐于帮忙，偶尔会吐槽但不刻薄',
     'style': '像真人朋友一样聊天，回复简短口语化，一般一两句话；别用列表或 Markdown，别长篇大论',
     'catchphrases': '',
@@ -744,13 +745,15 @@ PERSONA_PRESET = {
     'extra': '',
 }
 PERSONA_FIELDS = tuple(PERSONA_PRESET)
-_PERSONA_LIMITS = {'name': 12, 'developer': 24, 'identity': 40}
+_PERSONA_LIMITS = {'name': 12, 'developer': 24, 'identity': 40, 'appearance': 120}
 
 
 def compose_persona(p: dict) -> str:
     """Fields -> the persona text the bot puts at the top of every prompt."""
     name = p.get('name') or PERSONA_PRESET['name']
     out = [f'你叫"{name}"，是由 {p.get("developer") or PERSONA_PRESET["developer"]} 开发的{p.get("identity") or "微信聊天助手"}。']
+    if p.get('appearance'):
+        out.append(f'你的形象：{p["appearance"]}。'.replace('。。', '。'))
     for key, label in (
         ('personality', '性格'),
         ('style', '说话方式'),

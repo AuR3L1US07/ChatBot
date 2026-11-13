@@ -417,6 +417,8 @@ details summary{cursor:pointer;color:var(--muted);font-size:13px;margin-top:14px
             </div>
             <div class="muted" style="margin-top:6px">名字要和小号的微信昵称一致：别人 @、叫名字、拍一拍都是按这个名字识别的。</div>
             <label class="f">身份定位</label><input id="pf-identity" type="text" maxlength="40" placeholder="例如：微信聊天助手、群里的吉祥物、学习搭子">
+            <label class="f">形象</label><input id="pf-appearance" type="text" maxlength="120" placeholder="长什么样，例如：橙色长发的 Q 版女孩">
+            <div class="muted" style="margin-top:6px">机器人发的内置表情包就是它的样子；有人问“这图是你吗”，它会按这里的描述认下来。</div>
             <label class="f">性格</label><textarea id="pf-personality" rows="2" placeholder="例如：随和、真诚、有点小幽默"></textarea>
             <div class="chips pf-chips" data-for="pf-personality"></div>
             <label class="f">说话方式</label><textarea id="pf-style" rows="3" placeholder="例如：口语化，一般一两句话，不用列表"></textarea>
@@ -972,7 +974,7 @@ $('#sk-grid').onclick = async e => {
 };
 
 // persona
-const PF = ['name', 'developer', 'identity', 'personality', 'style', 'catchphrases', 'likes', 'avoid', 'extra'];
+const PF = ['name', 'developer', 'identity', 'appearance', 'personality', 'style', 'catchphrases', 'likes', 'avoid', 'extra'];
 const PF_CHIPS = {
   'pf-personality': ['随和', '真诚', '幽默', '毒舌但不刻薄', '温柔', '高冷', '元气满满', '爱吐槽', '靠谱', '有点傲娇'],
   'pf-style': ['口语化', '一般一两句话', '偶尔用 emoji', '不用列表和 Markdown', '爱接梗', '说话简洁', '语气轻松'],
@@ -982,6 +984,7 @@ function pfGet() { const o = {}; for (const k of PF) o[k] = $('#pf-' + k).value.
 function pfSet(p) { for (const k of PF) $('#pf-' + k).value = p[k] || ''; pfPreview(); }
 function pfCompose(p) {
   const out = [`你叫"${p.name || '小克'}"，是由 ${p.developer || 'AuR3L1US'} 开发的${p.identity || '微信聊天助手'}。`];
+  if (p.appearance) out.push(`你的形象：${p.appearance}。`.replace('。。', '。'));
   for (const [k, label] of [['personality', '性格'], ['style', '说话方式'], ['catchphrases', '口头禅（偶尔自然地用，别每句都用）'], ['likes', '兴趣和喜好'], ['avoid', '不要做的事']])
     if (p[k]) out.push(`${label}：${p[k]}。`.replace('。。', '。'));
   if (p.extra) out.push(p.extra);
