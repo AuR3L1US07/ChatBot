@@ -1137,4 +1137,8 @@ if __name__ == '__main__':
     threading.Thread(target=_fit_windows_forever, daemon=True).start()
     if not _admin().get('hash'):
         print(f'[wxadmin] first-time setup code: {setup_code()}', flush=True)
+    try:  # under memory pressure the kernel should kill this page server, not WeChat
+        pathlib.Path('/proc/self/oom_score_adj').write_text('500')
+    except OSError:
+        pass
     ThreadingHTTPServer(('0.0.0.0', 6081), Handler).serve_forever()

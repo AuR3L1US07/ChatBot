@@ -2064,7 +2064,19 @@ def maybe_learn() -> None:
 # ───────────────────────── main loop ─────────────────────────
 
 
+def _oom_first() -> None:
+    """When the container runs out of memory the kernel kills the biggest process -
+    WeChat - which logs the account out. Volunteer this bot instead: the launcher
+    restarts it within seconds and nothing is lost. (Raising one's own score needs no
+    privileges.)"""
+    try:
+        pathlib.Path('/proc/self/oom_score_adj').write_text('800')
+    except OSError:
+        pass
+
+
 def main() -> None:
+    _oom_first()
     STATE.mkdir(mode=0o700, exist_ok=True)
     prev: dict[str, str] = {}
     sent: dict[str, list[str]] = _load_sent()  # per chat: our own recent replies (kept across restarts)
