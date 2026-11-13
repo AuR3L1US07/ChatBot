@@ -366,12 +366,19 @@ def _db_conns():
         raise RuntimeError('no database keys')
     m = re.search(r'/(wxid_[A-Za-z0-9]+?)_\d+/db_storage/', msg)
     own = m.group(1) if m else ''
-    return (
-        wxdb.PlainCopy(msg, keys[msg]).connect(),
-        wxdb.PlainCopy(contact, keys[contact]).connect(),
-        own,
-        zstandard.ZstdDecompressor(),
-    )
+
+    def copy(path: str):
+        # One long-lived copier per database: it keeps the decrypted base and only redoes
+        # work when WeChat's file or its -wal actually changed.
+        c = _COPIES.get(path)
+        if c is None or c.key != keys[path]:
+            c = _COPIES[path] = wxdb.PlainCopy(path, keys[path])
+        return c
+
+    return (copy(msg).connect(), copy(contact).connect(), own, zstandard.ZstdDecompressor())
+
+
+_COPIES: dict = {}
 
 
 def _text(raw, dec) -> str:
@@ -384,9 +391,18 @@ def _text(raw, dec) -> str:
 def harvest(limit: int = 15) -> int:
     """Collect stickers other people sent in groups since the last run. Returns how many
     new ones were stored."""
+    msg_db, contact_db, own, dec = _db_conns()
+    try:
+        return _harvest(msg_db, contact_db, own, dec, limit)
+    finally:
+        # Open connections pin the old /dev/shm copies (30 MB each) after they are replaced.
+        msg_db.close()
+        contact_db.close()
+
+
+def _harvest(msg_db, contact_db, own: str, dec, limit: int) -> int:
     import html
 
-    msg_db, contact_db, own, dec = _db_conns()
     groups = {
         r['username']: (r['remark'] or r['nick_name'] or '').strip()
         for r in contact_db.execute("select username, nick_name, remark from contact where username like '%@chatroom'")

@@ -86,6 +86,8 @@ main{padding:26px 28px 40px;max-width:1240px;width:100%;margin:0 auto}
 .state .av svg.i{width:24px;height:24px}
 .state .t{font-size:18px;font-weight:700;display:flex;align-items:center;gap:8px}
 .screen{width:100%;aspect-ratio:16/10;border:0;border-radius:12px;background:#111;margin-top:14px;display:block}
+.screen-box:fullscreen{background:#0b0d10;display:flex;align-items:center;justify-content:center;padding:0}
+.screen-box:fullscreen .screen{width:100vw;height:100vh;aspect-ratio:auto;margin:0;border-radius:0}
 .steps{margin:12px 0 0;padding-left:18px;color:var(--sub);font-size:13px}
 .steps li{margin:3px 0}
 .tips{margin:12px 0 0;padding-left:18px;color:var(--sub);font-size:13px}
@@ -244,6 +246,8 @@ details summary{cursor:pointer;color:var(--muted);font-size:13px;margin-top:14px
   <symbol id="i-qr" viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="7" height="7" rx="1.8"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.8"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.8"/><rect x="5.8" y="5.8" width="2.4" height="2.4" rx=".5" fill="currentColor" stroke="none"/><rect x="15.8" y="5.8" width="2.4" height="2.4" rx=".5" fill="currentColor" stroke="none"/><rect x="5.8" y="15.8" width="2.4" height="2.4" rx=".5" fill="currentColor" stroke="none"/><path d="M14 14h2.5v2.5H14zM20 14v.01M14 20h.01M17.5 20H20v-2.5"/></symbol>
   <symbol id="i-ext" viewBox="0 0 24 24"><path d="M14 4h6v6M20 4l-8.5 8.5M18 14v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4"/></symbol>
   <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 11.5A8 8 0 0 0 5.6 7.2M4 4v4h4M4 12.5a8 8 0 0 0 14.4 4.3M20 20v-4h-4"/></symbol>
+  <symbol id="i-expand" viewBox="0 0 24 24"><path d="M4 9V5.5A1.5 1.5 0 0 1 5.5 4H9M15 4h3.5A1.5 1.5 0 0 1 20 5.5V9M20 15v3.5a1.5 1.5 0 0 1-1.5 1.5H15M9 20H5.5A1.5 1.5 0 0 1 4 18.5V15"/></symbol>
+  <symbol id="i-shrink" viewBox="0 0 24 24"><path d="M9 4v3.5A1.5 1.5 0 0 1 7.5 9H4M20 9h-3.5A1.5 1.5 0 0 1 15 7.5V4M15 20v-3.5a1.5 1.5 0 0 1 1.5-1.5H20M4 15h3.5A1.5 1.5 0 0 1 9 16.5V20"/></symbol>
   <symbol id="i-chev" viewBox="0 0 24 24"><path d="M9.5 6l6 6-6 6"/></symbol>
   <symbol id="i-upload" viewBox="0 0 24 24"><path d="M4 15v3a2.5 2.5 0 0 0 2.5 2.5h11A2.5 2.5 0 0 0 20 18v-3" /><path d="M12 15.5V4M7.5 8.5L12 4l4.5 4.5"/></symbol>
   <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7" fill="currentColor" fill-opacity=".16" stroke="none"/><circle cx="11" cy="11" r="7"/><path d="M20.5 20.5l-4.5-4.5"/></symbol>
@@ -363,9 +367,9 @@ details summary{cursor:pointer;color:var(--muted);font-size:13px;margin-top:14px
             </div>
           </div>
           <div class="card">
-            <div class="ch"><svg class="i"><use href="#i-monitor"/></svg>微信画面<span class="sp"></span><button class="btn icon ghost" id="screen-reload" title="重新连接画面"><svg class="i"><use href="#i-refresh"/></svg></button></div>
+            <div class="ch"><svg class="i"><use href="#i-monitor"/></svg>微信画面<span class="sp"></span><button class="btn icon ghost" id="screen-reload" title="重新连接画面"><svg class="i"><use href="#i-refresh"/></svg></button><button class="btn icon ghost" id="screen-full" title="全屏"><svg class="i"><use href="#i-expand"/></svg></button></div>
             <div class="muted" id="screen-hint">画面中出现二维码后，用小号扫码登录</div>
-            <iframe class="screen" id="screen" title="微信画面"></iframe>
+            <div class="screen-box" id="screen-box"><iframe class="screen" id="screen" title="微信画面" allow="fullscreen; clipboard-read; clipboard-write"></iframe></div>
             <ol class="steps">
               <li>等待画面中出现登录二维码（过期可点“刷新二维码”）</li>
               <li>用微信小号扫码，并在手机上点“登录”</li>
@@ -578,14 +582,31 @@ function go(t) {
   for (const x of document.querySelectorAll('#nav .nav')) x.classList.toggle('on', x.dataset.tab === t);
   for (const p of document.querySelectorAll('[data-page]')) p.classList.toggle('hidden', p.dataset.page !== t);
   $('#crumb').textContent = TITLES[t];
-  if (t === 'wechat' && !$('#screen').src) loadScreen();
+  if (t === 'wechat') { if (!screenOn()) loadScreen(); } else stopScreen();
   refresh();
 }
 $('#nav').onclick = e => { const b = e.target.closest('.nav'); if (b) go(b.dataset.tab); };
 document.addEventListener('click', e => { const g = e.target.closest('[data-goto]'); if (g) go(g.dataset.goto); });
 const SCREEN = '/wxscreen/vnc.html?path=wxscreen/websockify&autoconnect=1&resize=scale&reconnect=1&reconnect_delay=3000';
+// Each open screen is a live VNC connection on the server (~30 MB there): connect only
+// while the 微信登录 page is shown and the browser tab is visible.
+const screenOn = () => /wxscreen/.test($('#screen').getAttribute('src') || '');
 function loadScreen() { $('#screen').src = SCREEN + '&t=' + Date.now(); }
+function stopScreen() { if (screenOn() && !document.fullscreenElement) $('#screen').src = 'about:blank'; }
 $('#screen-reload').onclick = loadScreen;
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) stopScreen(); else if (tab === 'wechat' && !screenOn()) loadScreen();
+});
+$('#screen-full').onclick = () => {
+  const box = $('#screen-box');
+  if (document.fullscreenElement) document.exitFullscreen();
+  else (box.requestFullscreen || box.webkitRequestFullscreen).call(box);
+};
+document.addEventListener('fullscreenchange', () => {
+  const on = document.fullscreenElement === $('#screen-box');
+  $('#screen-full').title = on ? '退出全屏 (Esc)' : '全屏';
+  $('#screen-full use').setAttribute('href', on ? '#i-shrink' : '#i-expand');
+});
 
 // ── app ──
 let timer = null, settings = {}, llm = {}, logData = {entries:[], chats:[]}, current = null;

@@ -797,7 +797,7 @@ def _screenshot():
         return None
 
 
-HARVEST_EVERY = 45  # seconds between two looks at the database for new group stickers
+HARVEST_EVERY = 120  # seconds between two looks at the database for new group stickers
 _harvest = {'at': 0.0, 'busy': False}
 
 

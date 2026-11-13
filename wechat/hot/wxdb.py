@@ -98,7 +98,22 @@ class PlainCopy:
             out[(pgno - 1) * PAGE : pgno * PAGE] = _decrypt_page(self.key, page, pgno)
         return out[: size_pages * PAGE]
 
+    def _sig(self) -> tuple:
+        out = []
+        for f in (self.src, self.src.with_name(self.src.name + '-wal')):
+            try:
+                st = os.stat(f)
+                out.append((st.st_mtime_ns, st.st_size))
+            except OSError:
+                out.append(None)
+        return tuple(out)
+
     def refresh(self) -> pathlib.Path:
+        # Nothing changed since the last copy: reuse it. Decrypting and writing a 30 MB
+        # database every pass kept ~100 MB churning in RAM and /dev/shm.
+        sig = self._sig()
+        if sig == getattr(self, '_last_sig', None) and self.dst.exists():
+            return self.dst
         db = self._apply_wal(self._load_base())
         # Mark the plain copy as a normal rollback-journal database.
         db[18:20] = b'\x01\x01'
@@ -106,6 +121,7 @@ class PlainCopy:
         tmp.write_bytes(db)
         os.chmod(tmp, 0o600)
         tmp.replace(self.dst)
+        self._last_sig = sig
         return self.dst
 
     def connect(self) -> sqlite3.Connection:
