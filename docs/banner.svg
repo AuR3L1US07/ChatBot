@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="360" viewBox="0 0 1200 360">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0b1220"/><stop offset="1" stop-color="#10291f"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.82" cy="0.3" r="0.55">
+      <stop offset="0" stop-color="#07c160" stop-opacity="0.38"/><stop offset="1" stop-color="#07c160" stop-opacity="0"/>
+    </radialGradient>
+    <pattern id="dots" width="24" height="24" patternUnits="userSpaceOnUse">
+      <circle cx="2" cy="2" r="1" fill="#ffffff" fill-opacity="0.06"/>
+    </pattern>
+  </defs>
+  <rect width="1200" height="360" rx="24" fill="url(#bg)"/>
+  <rect width="1200" height="360" rx="24" fill="url(#dots)"/>
+  <rect width="1200" height="360" rx="24" fill="url(#glow)"/>
+  <g font-family="-apple-system,'PingFang SC','Microsoft YaHei','Segoe UI',sans-serif">
+    <text x="80" y="118" fill="#07c160" font-size="20" font-weight="600" letter-spacing="6">OPEN-SOURCE · WECHAT AI BOT</text>
+    <text x="78" y="196" fill="#ffffff" font-size="76" font-weight="800" letter-spacing="-1">ChatBot</text>
+    <text x="80" y="248" fill="#c9d4e3" font-size="28">把一个微信小号，变成会聊天的 AI 群友</text>
+    <text x="80" y="296" fill="#7f8ea3" font-size="18">官方 Linux 微信 · 网页后台 · 一条命令部署</text>
+  </g>
+  <g transform="translate(850 92)">
+    <rect x="0" y="0" width="250" height="64" rx="18" fill="#ffffff" fill-opacity="0.08" stroke="#ffffff" stroke-opacity="0.12"/>
+    <text x="22" y="40" fill="#e6edf6" font-size="20" font-family="'PingFang SC','Microsoft YaHei',sans-serif">@小克 今晚吃啥？</text>
+    <rect x="40" y="88" width="250" height="64" rx="18" fill="#07c160"/>
+    <text x="62" y="128" fill="#ffffff" font-size="20" font-family="'PingFang SC','Microsoft YaHei',sans-serif">火锅！谁请客我就去 🍲</text>
+    <rect x="0" y="176" width="150" height="40" rx="14" fill="#ffffff" fill-opacity="0.08"/>
+    <text x="22" y="202" fill="#9fb0c5" font-size="16" font-family="'PingFang SC','Microsoft YaHei',sans-serif">[表情包] 干饭</text>
+  </g>
+</svg>
