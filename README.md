@@ -13,7 +13,7 @@
 **私聊秒回 · 群里会接梗 · 看得懂图 · 会偷表情包 · 记得住每个群的黑话**<br>
 所有设置都在网页后台里点几下完成，不用改代码。
 
-[快速开始](#-快速开始) · [功能](#-功能) · [工作原理](#-工作原理) · [常见问题](#-常见问题)
+[快速开始](#-快速开始) · [功能](#-功能) · [界面预览](#️-界面预览) · [工作原理](#-工作原理) · [常见问题](#-常见问题)
 
 </div>
 
@@ -61,6 +61,24 @@
 </td>
 </tr>
 </table>
+
+## 🖼️ 界面预览
+
+<table>
+<tr>
+<td width="50%"><img src="docs/screenshots/dash.webp" alt="仪表盘"><p align="center"><sub>仪表盘：今天收到和回复了多少消息，以及最近 7 天的趋势</sub></p></td>
+<td width="50%"><img src="docs/screenshots/chats.webp" alt="对话管理"><p align="center"><sub>对话管理：看每个对话的聊天记录，并单独设置</sub></p></td>
+</tr>
+<tr>
+<td width="50%"><img src="docs/screenshots/persona.webp" alt="人设"><p align="center"><sub>人设：名字、性格、说话方式，点一下就能添加常用词</sub></p></td>
+<td width="50%"><img src="docs/screenshots/stickers.webp" alt="表情包管理"><p align="center"><sub>表情包管理：自动收集，可以改标签、停用、上传</sub></p></td>
+</tr>
+<tr>
+<td colspan="2"><img src="docs/screenshots/model.webp" alt="AI 接口"><p align="center"><sub>AI 接口：内置多个平台预设，选平台、填 Key 就能用</sub></p></td>
+</tr>
+</table>
+
+<sub>截图中的群名和聊天内容都是演示数据。</sub>
 
 ## 🚀 快速开始
 
