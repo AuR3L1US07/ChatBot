@@ -180,13 +180,29 @@ def calibrate() -> float:
     return scale
 
 
+_NAV: dict = {}
+
+
 def _contacts_nav():
-    """The 通讯录 button of the left navigation bar (the wide one, not its icon)."""
+    """The 通讯录 button of the left navigation bar (the wide one, not its icon).
+
+    Finding it means walking WeChat's whole UI tree (thousands of D-Bus round trips,
+    which WeChat has to answer), and the badge check asks for it twice a minute around
+    the clock. The button never goes away while WeChat runs, so it is remembered and
+    only looked up again when it stops answering as the 通讯录 button."""
+    node = _NAV.get('node')
+    if node is not None:
+        e = _extents(node)
+        if _role(node) in BUTTON_ROLES and NAV_CONTACTS.match(_name(node)) and e is not None and 0 < e.width and e.x < 80:
+            return node
+        _NAV.clear()
     best = None
     for node in _find(_wechat_apps(), NAV_CONTACTS, BUTTON_ROLES):
         e = _extents(node)
         if e is not None and e.x < 80 and (best is None or e.width > _extents(best).width):
             best = node
+    if best is not None:
+        _NAV['node'] = best
     return best
 
 
@@ -404,7 +420,7 @@ def _confirm_dialog(main_frame=None) -> bool:
 
 
 # ── WeChat 4.x flow (seen live 2026-11-13) ──
-# row "孙金辰 / 我是孙金辰 / 等待验证" (plain text) → click the row body → the right pane
+# row "张三 / 我是张三 / 等待验证" (plain text) → click the row body → the right pane
 # shows the request with a 「前往验证」 push button → that opens the top-level frame
 # 「通过朋友验证」 (备注 / 标签 / 朋友权限) → its 「确定」 finishes it; the row turns 已添加.
 # Qt reuses that frame and AT-SPI keeps reporting it as showing after it closed (it still

@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import difflib
 import hashlib
+import http.client
 import io
 import json
 import os
@@ -66,6 +67,12 @@ STICKER_TAG = re.compile(r'\s*[\[［【]\s*表情包?\s*[:：]\s*([^\]］】]{1,
 STICKER_OWN_MARKS = ('[图片]', '图片', '[动画表情]', '动画表情')  # how our sent sticker shows up on screen
 
 POLL_SECONDS = 1
+# Every look at the chat list is a few dozen D-Bus round trips that WeChat itself has to
+# answer (it was the main CPU load of the whole container). So when the list has not
+# changed for a while, look less often; the first new message brings the fast pace back.
+IDLE_AFTER = 90  # seconds without any change in the chat list
+IDLE_POLL_SECONDS = 2.5
+NO_WECHAT_POLL_SECONDS = 4  # WeChat is not running / not logged in yet
 CHAT_COOLDOWN = 4
 GLOBAL_PER_MINUTE = 20  # 10 was hit in two busy groups and deferred messages aimed at us
 CONTEXT_MESSAGES = 10
@@ -227,18 +234,22 @@ def _is_system(name: str) -> bool:
     return name in SYSTEM_NAMES or name.startswith('公众号')
 
 
+LOG_MAX_BYTES = 32 * 1024 * 1024  # then log.jsonl becomes log.jsonl.1 (one old file is kept)
+
+
 def append_log(entry: dict) -> None:
     STATE.mkdir(mode=0o700, exist_ok=True)
+    try:
+        if LOG.stat().st_size > LOG_MAX_BYTES:
+            os.replace(LOG, LOG.with_name(LOG.name + '.1'))
+    except OSError:
+        pass
     with open(LOG, 'a', encoding='utf-8') as f:
         f.write(json.dumps(entry, ensure_ascii=False) + '\n')
     try:
         os.chmod(LOG, 0o600)
     except OSError:
         pass
-
-
-def _norm(text: str) -> str:
-    return re.sub(r'\s+', '', text or '')
 
 
 def _unanswered_mentions(chats: list[dict], settings: dict) -> list[str]:
@@ -276,12 +287,26 @@ def _unanswered_mentions(chats: list[dict], settings: dict) -> list[str]:
 import pyatspi  # noqa: E402
 
 
+_app_cache: dict = {}
+
+
 def _wechat_app():
+    # The application node lives as long as WeChat does: one call checks it is still
+    # there, instead of listing the desktop's applications on every pass.
+    a = _app_cache.get('app')
+    if a is not None:
+        try:
+            if (a.name or '').lower() in ('wechat', 'weixin', '微信') and a.childCount:
+                return a
+        except Exception:
+            pass
+        _app_cache.clear()
     d = pyatspi.Registry.getDesktop(0)
     for i in range(d.childCount):
         try:
             a = d.getChildAtIndex(i)
             if (a.name or '').lower() in ('wechat', 'weixin', '微信'):
+                _app_cache['app'] = a
                 return a
         except Exception:
             continue
@@ -644,6 +669,8 @@ def _meme_intent(reply: str) -> str | None:
 
 def _named_sticker(name: str) -> pathlib.Path | None:
     """Uploaded stickers win over the built-in set; ones switched off on the admin page are skipped."""
+    if not name or name.startswith('.') or any(c in name for c in '/\\\0:'):
+        return None  # the name comes from the model's reply: it must stay a plain file name
     if name in (load_settings().get('sticker_disabled') or []):
         return None
     for folder in (CUSTOM_STICKER_DIR, STICKER_DIR):
@@ -1530,6 +1557,8 @@ def describe_media(app, name: str, incoming: str, settings: dict, row=None, shot
             '（请结合图里的具体内容和数字，用文字自然地回应；可以再带一个表情包，但不要只发表情包）]'
         )
         _seen_cache[key] = seen
+        while len(_seen_cache) > _SEEN_KEEP:
+            _seen_cache.pop(next(iter(_seen_cache)))
         return seen
     crop.thumbnail((768, 768))
     buf = io.BytesIO()
@@ -1547,7 +1576,7 @@ def describe_media(app, name: str, incoming: str, settings: dict, row=None, shot
         return ''
     seen = f'[对方发来一个{kind}：{desc}]'
     _seen_cache[key] = seen
-    if len(_seen_cache) > _SEEN_KEEP:
+    while len(_seen_cache) > _SEEN_KEEP:
         _seen_cache.pop(next(iter(_seen_cache)))
     return seen
 
@@ -1559,7 +1588,7 @@ def describe_media(app, name: str, incoming: str, settings: dict, row=None, shot
 # chat list for a few seconds, so a pass only runs while no reply is being prepared.
 
 FRIEND_SCAN_EVERY = 45  # seconds between checks while a request shows up as a chat
-FRIEND_BADGE_CHECK = 15  # seconds between looks at the 通讯录 red badge (cheap, no clicks)
+FRIEND_BADGE_CHECK = 30  # seconds between looks at the 通讯录 red badge (no clicks; may take a screenshot)
 FRIEND_FALLBACK_SCAN = 1800  # open 通讯录 anyway this often, in case a badge was missed
 FRIEND_QUIET = 12  # leave the UI alone this long after handling a message
 # The 新的朋友 chat stays in the list forever; only a preview that still reads like a
@@ -1686,11 +1715,17 @@ def _completion(messages: list[dict], max_tokens: int, temperature: float, tools
             last_exc = exc
             log(f'model {model} failed: HTTP {exc.code}, trying next')
             continue
-        except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        except (urllib.error.URLError, TimeoutError, OSError, http.client.HTTPException, ValueError) as exc:
             last_exc = exc
             log(f'model {model} failed: {type(exc).__name__}, trying next')
             continue
-        return resp['choices'][0]['message'] or {}
+        try:
+            msg = resp['choices'][0]['message']
+        except (KeyError, IndexError, TypeError):
+            last_exc = ValueError('unexpected answer from the model API')
+            log(f'model {model} failed: unexpected answer, trying next')
+            continue
+        return msg if isinstance(msg, dict) else {}
     raise last_exc or OSError('no model answered')
 
 
@@ -2088,7 +2123,64 @@ def maybe_learn() -> None:
         threading.Thread(target=_learn, args=(due[0],), daemon=True).start()
 
 
+# ───────────────────────── idle WeChat helpers ─────────────────────────
+#
+# Opening a picture in WeChat's viewer starts its OCR helper (wxocr, a Chromium-style
+# child process of ~220 MB) and it then stays for good, doing nothing. WeChat starts it
+# again when it wants it, so one that has not used any CPU for a while is told to quit.
+# Switch off with "trim_helpers": false in settings.json.
+
+HELPER_NAMES = ('wxocr',)
+HELPER_IDLE_SECONDS = 300
+HELPER_MIN_RSS = 60 * 1024 * 1024
+HELPER_CHECK_EVERY = 60
+_helpers: dict = {'at': 0.0, 'seen': {}}  # pid -> (cpu ticks, since when unchanged)
+
+
+def trim_idle_helpers(settings: dict, proc: pathlib.Path = pathlib.Path('/proc')) -> list[int]:
+    import signal
+
+    now = time.time()
+    if not settings.get('trim_helpers', True) or now - _helpers['at'] < HELPER_CHECK_EVERY:
+        return []
+    _helpers['at'] = now
+    seen: dict = {}
+    killed = []
+    try:
+        entries = [d for d in proc.iterdir() if d.name.isdigit()]
+    except OSError:
+        return []
+    for d in entries:
+        try:
+            if (d / 'comm').read_text().strip() not in HELPER_NAMES:
+                continue
+            # Fields after the "(comm)": utime and stime are the 12th and 13th.
+            rest = (d / 'stat').read_text().rsplit(')', 1)[1].split()
+            ticks = int(rest[11]) + int(rest[12])
+            rss = int((d / 'statm').read_text().split()[1]) * os.sysconf('SC_PAGE_SIZE')
+        except (OSError, ValueError, IndexError):
+            continue
+        pid = int(d.name)
+        old = _helpers['seen'].get(pid)
+        since = old[1] if old and old[0] == ticks else now
+        seen[pid] = (ticks, since)
+        if now - since >= HELPER_IDLE_SECONDS and rss >= HELPER_MIN_RSS:
+            try:
+                os.kill(pid, signal.SIGTERM)
+                killed.append(pid)
+                seen.pop(pid, None)
+                log(f'idle helper stopped: pid {pid}, {rss >> 20} MB freed')
+            except OSError:
+                pass
+    _helpers['seen'] = seen
+    return killed
+
+
 # ───────────────────────── main loop ─────────────────────────
+
+# What a failed model call may raise; anything else would abort the whole pass.
+LLM_ERRORS = (urllib.error.URLError, OSError, ValueError, KeyError, IndexError, TypeError, AttributeError,
+              http.client.HTTPException)
 
 
 def _oom_first() -> None:
@@ -2116,17 +2208,27 @@ def main() -> None:
     recent: list[float] = []
     chat_hist: dict[str, list[dict]] = {}  # per-chat independent conversation context
     warmed = False
+    snapshot: dict = {}
+    handled: list[str] = []  # chats the current pass has got to (see the except below)
+    crashes: dict[str, int] = {}  # chat -> passes in a row that failed while handling it
+    pause = POLL_SECONDS
+    last_keys: dict = {}
+    changed_at = time.time()
     load_memory()
     log(f'UI bot started ({len(_mem)} chats in memory)')
     while True:
-        time.sleep(POLL_SECONDS)
+        time.sleep(pause)
+        pause = POLL_SECONDS
         try:
             base_settings = settings = load_settings()
+            trim_idle_helpers(base_settings)
             app = _wechat_app()
             if app is None:
+                pause = NO_WECHAT_POLL_SECONDS
                 continue
             chats = chat_list(app)
             if not chats:
+                pause = NO_WECHAT_POLL_SECONDS
                 continue
             # A group stays a group: once the bot itself speaks, the preview loses its
             # "昵称: " prefix and the chat would otherwise look private (and the bot
@@ -2157,6 +2259,11 @@ def main() -> None:
                 _write_json(CHATS, {'time': int(time.time()), 'chats': listing})
                 last_listing = listing
             snapshot = {c['name']: c['key'] for c in chats}
+            handled.clear()
+            if snapshot != last_keys:
+                last_keys, changed_at = dict(snapshot), time.time()
+            elif time.time() - changed_at > IDLE_AFTER:
+                pause = IDLE_POLL_SECONDS
             if not warmed:
                 # First pass only records the current state; never reply to backlog -
                 # except an @-mention of us that is not in the log yet: it arrived while
@@ -2171,6 +2278,7 @@ def main() -> None:
                 maybe_accept_friends(app, chats)
             for c in chats:
                 name, preview, at, group = c['name'], c['preview'], c['at'], c['group']
+                handled.append(name)
                 settings = chat_settings(base_settings, name)
                 if not is_new(prev.get(name), c['key']):
                     continue
@@ -2389,7 +2497,7 @@ def main() -> None:
                 else:
                     try:
                         reply = ask_llm(settings, name, group, hist, notes, smart=smart)
-                    except (urllib.error.URLError, OSError, ValueError, KeyError) as exc:
+                    except LLM_ERRORS as exc:
                         hist.pop()
                         entry['error'] = f'llm: {type(exc).__name__}'
                         append_log(entry)
@@ -2431,7 +2539,7 @@ def main() -> None:
                         if again and not _meme_intent(again):
                             reply = again
                             entry['retried_text'] = True
-                    except (urllib.error.URLError, OSError, ValueError, KeyError):
+                    except LLM_ERRORS:
                         pass
                 if not reply and pic is None and not want_pat:
                     hist.pop()
@@ -2458,20 +2566,27 @@ def main() -> None:
                         continue
                     mine = sent.setdefault(name, [])
                     if pic:
-                        # Our own picture shows up as [图片]/[动画表情]: never answer it back.
-                        mine.extend(STICKER_OWN_MARKS)
+                        # (Our own picture is told apart by layout - newest_is_ours - so
+                        # only the text part is remembered.)
                         if reply:
                             mine.append(reply)
+                            del mine[:-OWN_MEMORY]
                             send_text(reply)
-                        del mine[:-OWN_MEMORY]
-                        if not send_image(pic['path']):
+                        if send_image(pic['path']):
+                            label = (reply + ' ' if reply else '') + f'[表情: {pic["label"]}]'
+                        elif reply:
+                            # The words did go out: this is a sent reply, minus its picture.
+                            entry['sticker_failed'] = True
+                            entry['reply'] = label = reply
+                        else:
                             hist.pop()
                             entry['error'] = 'sticker_send_failed'
                             append_log(entry)
                             continue
                         entry['sent'] = True
-                        label = (reply + ' ' if reply else '') + f'[表情: {pic["label"]}]'
                         hist.append({'role': 'assistant', 'text': label})
+                        if learn and reply:
+                            observe(name, group, _ME, reply)
                     elif reply:
                         mine.append(reply)  # before sending, so the echo is always recognised
                         del mine[:-OWN_MEMORY]
@@ -2491,14 +2606,55 @@ def main() -> None:
                     _write_json(SENT_FILE, sent)
                 append_log(entry)
                 log(f'{"(dry) " if settings["dry_run"] else ""}reply to {name}: {(entry.get("reply") or reply)[:40]}')
-            prev = snapshot
+            # Merge, do not replace: a chat missing from one reading of the list (a stale
+            # UI node, a list that is still loading) must not look brand new - and get
+            # its old message answered again - when it shows up in the next reading.
+            for gone in [n for n in prev if n not in snapshot][:-2000]:
+                del prev[gone]
+            prev = {**prev, **snapshot}
+            crashes.clear()
             if base_settings.get('learn', True):
                 maybe_learn()
             maybe_harvest(base_settings)
         except Exception as exc:
             log(f'loop error: {type(exc).__name__}: {exc}')
+            # The chats this pass already went through count as seen. Otherwise the next
+            # pass starts over: the same messages are judged and logged again, every 5
+            # seconds, for as long as the error lasts. The chat it failed on gets two
+            # more tries (the UI may just have been mid-redraw), then it is given up too.
+            if handled:
+                failed = handled[-1]
+                crashes[failed] = crashes.get(failed, 0) + 1
+                if crashes[failed] < 3:
+                    handled.pop()
+                else:
+                    crashes.pop(failed, None)
+                    log(f'giving up on the newest message in {failed}')
+            for done in handled:
+                if done in snapshot:
+                    prev[done] = snapshot[done]
+            handled.clear()
             time.sleep(5)
 
 
+def _lean_malloc() -> None:
+    """Start over once with glibc told to hand freed memory back. By default it keeps
+    big freed blocks (4 MB screenshots, pictures, model answers) inside the process and
+    its "large block" limit creeps up to 32 MB, so the bot only ever grew. The command
+    line stays `python3 <this file>`: the launcher and the admin page find the bot by it."""
+    if sys.platform != 'linux' or os.environ.get('MALLOC_ARENA_MAX'):
+        return
+    os.environ.update({
+        'MALLOC_ARENA_MAX': '2',
+        'MALLOC_MMAP_THRESHOLD_': '131072',
+        'MALLOC_TRIM_THRESHOLD_': '131072',
+    })
+    try:
+        os.execvp('python3', ['python3', *sys.argv])
+    except OSError:
+        pass
+
+
 if __name__ == '__main__':
+    _lean_malloc()
     main()

@@ -27,6 +27,10 @@ import urllib.request
 
 try:
     from PIL import Image
+
+    # Stickers come from strangers: a few-MB file can claim to be 100+ megapixels and
+    # eat the container's memory when decoded. Screenshots here are ~1 megapixel.
+    Image.MAX_IMAGE_PIXELS = 16_000_000
 except Exception:  # pragma: no cover
     Image = None  # type: ignore
 
@@ -347,6 +351,39 @@ def save(raw: bytes, chat: str = '', ctx: list[str] | None = None, sender: str =
 
 HERE = pathlib.Path(__file__).resolve().parent
 DB_MAX_BYTES = 4_000_000  # an animated sticker can be a few MB
+
+
+# The download link sits inside the message, i.e. it is written by whoever sent the
+# sticker. It must lead to the public internet only - never to this machine, the Docker
+# network (the admin server listens there without TLS) or the cloud metadata service.
+def _public_url(url: str) -> bool:
+    import ipaddress
+    import socket
+    import urllib.parse
+
+    try:
+        u = urllib.parse.urlsplit(url)
+        if u.scheme not in ('http', 'https') or not u.hostname or u.username or u.password:
+            return False
+        infos = socket.getaddrinfo(u.hostname, u.port or (443 if u.scheme == 'https' else 80), type=socket.SOCK_STREAM)
+        return bool(infos) and all(ipaddress.ip_address(i[4][0].split('%')[0]).is_global for i in infos)
+    except (OSError, ValueError):
+        return False
+
+
+class _PublicRedirects(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        if not _public_url(newurl):
+            return None  # urllib then raises HTTPError for the 3xx
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+def _fetch_public(url: str, limit: int, timeout: int = 20) -> bytes:
+    if not _public_url(url):
+        raise ValueError('not a public address')
+    opener = urllib.request.build_opener(_PublicRedirects)
+    with opener.open(url, timeout=timeout) as resp:
+        return resp.read(limit + 1)
 _ATTR = re.compile(r'(\w+)="([^"]*)"')
 
 
@@ -445,7 +482,7 @@ def _harvest(msg_db, contact_db, own: str, dec, limit: int) -> int:
         if not url.startswith('http'):
             continue
         try:
-            data = urllib.request.urlopen(url, timeout=20).read(DB_MAX_BYTES + 1)
+            data = _fetch_public(url, DB_MAX_BYTES)
         except Exception:
             continue
         if len(data) > DB_MAX_BYTES or hashlib.md5(data).hexdigest() != wx_md5:

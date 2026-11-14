@@ -84,9 +84,11 @@ def _window_ids() -> list[tuple[str, dict]]:
 def _fit_windows_forever() -> None:
     """Fill the virtual screen with the main window (no black border on the admin page)
     and keep the small login/QR window centred. The screen resolution never changes."""
+    screen: list[str] = []
     while True:
         try:
-            screen = _run('xdotool', 'getdisplaygeometry').split()
+            # (each xdotool call is a new process: ask for the fixed screen size once)
+            screen = screen if len(screen) >= 2 else _run('xdotool', 'getdisplaygeometry').split()
             sw, sh = int(screen[0]), int(screen[1])
             for wid, g in _window_ids():
                 if g['WIDTH'] >= MAIN_WINDOW_MIN_WIDTH:
@@ -97,8 +99,8 @@ def _fit_windows_forever() -> None:
                     if abs(g['X'] - cx) > 4 or abs(g['Y'] - cy) > 4:
                         _run('xdotool', 'windowmove', wid, str(cx), str(cy))
         except (ValueError, IndexError):
-            pass
-        time.sleep(3)
+            screen = []
+        time.sleep(5)
 
 
 def relogin() -> None:
@@ -111,11 +113,18 @@ _SETTINGS_FILE = HOME / '.wxbot' / 'settings.json'
 _CHATS_FILE = HOME / '.wxbot' / 'chats.json'
 
 
-def read_log(limit: int = 300) -> list:
+def read_log(limit: int = 300, tail_bytes: int = 1024 * 1024) -> list:
+    # Only the tail: the log grows forever and the admin page polls this every 10 s.
     try:
-        lines = _LOG_FILE.read_text(encoding='utf-8').splitlines()
+        with open(_LOG_FILE, 'rb') as f:
+            f.seek(0, 2)
+            start = max(0, f.tell() - tail_bytes)
+            f.seek(start)
+            lines = f.read().decode('utf-8', 'ignore').splitlines()
     except OSError:
         return []
+    if start and lines:
+        lines = lines[1:]  # the first line is cut in half by the seek above
     out = []
     for line in lines[-limit:]:
         try:
@@ -268,7 +277,8 @@ def read_chats() -> list:
 
 def read_settings() -> dict:
     try:
-        return json.loads(_SETTINGS_FILE.read_text(encoding='utf-8'))
+        data = json.loads(_SETTINGS_FILE.read_text(encoding='utf-8'))
+        return data if isinstance(data, dict) else {}
     except (OSError, ValueError):
         return {}
 
@@ -315,6 +325,7 @@ GLOBAL_BOOL_KEYS = (
     'steal_meme',
     'use_meme',
     'auto_accept_friend',
+    'web_search',
 )
 CHAT_BOOL_KEYS = ('enabled', 'use_meme', 'learn', 'read_media', 'read_voice', 'reply_pat')
 ACTIVITY_LEVELS = ('quiet', 'normal', 'active', 'chatty')
@@ -364,8 +375,9 @@ def write_chat_settings(name: str, over) -> dict:
             clean['group_reply'] = over['group_reply']
         if isinstance(over.get('persona'), str) and over['persona'].strip():
             clean['persona'] = over['persona'].strip()[:2000]
+    name = name[:200]
     if clean:
-        chats[name[:200]] = clean
+        chats[name] = clean
     else:
         chats.pop(name, None)
     cur['chats'] = chats
@@ -473,11 +485,16 @@ def save_llm(patch: dict) -> dict:
     if not base_url.startswith(('https://', 'http://')):
         raise ValueError('请填写接口地址（以 http:// 或 https:// 开头）')
     key = str(patch.get('api_key') or '').strip()
-    if not key and provider == old_provider:
+    # The saved key is only reused for the address it was saved for: otherwise anyone
+    # holding a session could point base_url at their own server and collect the key.
+    same_base = base_url.rstrip('/') == str(cur.get('base_url') or DEFAULT_BASE_URL).rstrip('/')
+    if not key and provider == old_provider and same_base:
         key = str(cur.get('api_key') or '')
     if not key:
         if not preset.get('no_key'):
-            raise ValueError('换了平台，请填写这个平台的 API Key' if provider != old_provider else '请填写 API Key')
+            if provider != old_provider:
+                raise ValueError('换了平台，请填写这个平台的 API Key')
+            raise ValueError('接口地址变了，请重新填写 API Key' if cur.get('api_key') and not same_base else '请填写 API Key')
         key = 'none'
     model = str(patch.get('model') or (cur.get('model') if provider == old_provider else '') or preset['model']).strip()
     if not model:
@@ -613,8 +630,18 @@ def system_info() -> dict:
         'disk': disk,
         'uptime': _uptime(),
         'procs': sorted(({'name': k, 'rss': v} for k, v in groups.items()), key=lambda x: -x['rss']),
-        'cleanable': sum(size for _path, size in _cleanable()),
+        'cleanable': _cleanable_size(),
     }
+
+
+_CLEANABLE: dict = {'at': 0.0, 'size': 0}
+
+
+def _cleanable_size() -> int:
+    # Walking WeChat's cache folders costs disk reads; the dashboard asks every 10 s.
+    if time.time() - _CLEANABLE['at'] > 600:
+        _CLEANABLE.update(at=time.time(), size=sum(size for _path, size in _cleanable()))
+    return _CLEANABLE['size']
 
 
 def _old_files(folder: pathlib.Path, days: float) -> list[tuple[pathlib.Path, int]]:
@@ -648,6 +675,7 @@ def _cleanable() -> list[tuple[pathlib.Path, int]]:
 def optimize() -> dict:
     freed = 0
     removed = 0
+    _CLEANABLE['at'] = 0.0
     for f, size in _cleanable():
         try:
             f.unlink()
@@ -670,7 +698,32 @@ def optimize() -> dict:
 _ADMIN_FILE = HOME / '.wxbot' / 'admin.json'
 _SETUP_CODE_FILE = HOME / '.wxbot' / 'setup-code.txt'
 SESSION_SECONDS = 30 * 86400
-_login_failures: list[float] = []
+ATTEMPT_WINDOW = 600  # seconds
+ATTEMPTS_PER_IP = 10  # wrong passwords / setup codes from one address per window
+ATTEMPTS_TOTAL = 200  # ... and from everyone together (a botnet must not get more)
+_attempts: list[tuple[float, str]] = []
+_attempts_lock = threading.Lock()
+
+
+def attempt_allowed(ip: str) -> bool:
+    """Reserve one password / setup-code guess for `ip`. The slot is taken BEFORE the
+    check runs, so parallel requests cannot all slip through; a correct guess gives it
+    back (attempt_ok)."""
+    now = time.time()
+    with _attempts_lock:
+        _attempts[:] = [a for a in _attempts if now - a[0] < ATTEMPT_WINDOW]
+        if len(_attempts) >= ATTEMPTS_TOTAL or sum(1 for a in _attempts if a[1] == ip) >= ATTEMPTS_PER_IP:
+            return False
+        _attempts.append((now, ip))
+        return True
+
+
+def attempt_ok(ip: str) -> None:
+    with _attempts_lock:
+        for i in range(len(_attempts) - 1, -1, -1):
+            if _attempts[i][1] == ip:
+                del _attempts[i]
+                break
 
 
 def _admin() -> dict:
@@ -701,7 +754,10 @@ def check_password(password: str) -> bool:
     admin = _admin()
     if not admin.get('hash'):
         return False
-    return hmac.compare_digest(_hash_password(password, admin['salt']), admin['hash'])
+    try:
+        return hmac.compare_digest(_hash_password(password, str(admin['salt'])), str(admin['hash']))
+    except (KeyError, ValueError):
+        return False
 
 
 def setup_code() -> str:
@@ -732,8 +788,8 @@ def valid_session(token: str) -> bool:
     try:
         exp, sig = base64.urlsafe_b64decode(token.encode()).decode().split('.', 1)
         good = hmac.new(bytes.fromhex(secret), exp.encode(), hashlib.sha256).hexdigest()
-        return hmac.compare_digest(sig, good) and int(exp) > time.time()
-    except (ValueError, UnicodeDecodeError):
+        return hmac.compare_digest(sig.encode(), good.encode()) and int(exp) > time.time()
+    except (ValueError, TypeError):
         return False
 
 
@@ -827,8 +883,9 @@ def _meme_index() -> dict:
 
 def _save_meme_index(data: dict) -> None:
     _MEME_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
-    tmp = _MEME_INDEX.with_suffix('.tmp')
+    tmp = _MEME_INDEX.with_suffix('.admin.tmp')
     tmp.write_text(json.dumps(data, ensure_ascii=False), encoding='utf-8')
+    os.chmod(tmp, 0o600)
     tmp.replace(_MEME_INDEX)
 
 
@@ -932,6 +989,7 @@ def upload_named(name: str, b64: str) -> dict:
         from PIL import Image
         import io
 
+        Image.MAX_IMAGE_PIXELS = 16_000_000  # a 2 MB file can still unpack to gigabytes
         img = Image.open(io.BytesIO(raw))
         img.load()
         img.thumbnail((360, 360))
@@ -961,6 +1019,14 @@ _MAX_BODY_AUTHED = 4 * 1024 * 1024  # sticker uploads arrive as base64 JSON
 
 
 class Handler(BaseHTTPRequestHandler):
+    timeout = 60  # a stalled connection must not hold a thread forever
+
+    def _client(self) -> str:
+        # Behind the Caddy proxy the peer is always Caddy; it appends the real client
+        # address as the LAST X-Forwarded-For entry (earlier ones are client-supplied).
+        fwd = (self.headers.get('X-Forwarded-For') or '').split(',')[-1].strip()
+        return fwd or self.client_address[0]
+
     def _send(self, code: int, body, headers: dict | None = None) -> None:
         data = json.dumps(body, ensure_ascii=False).encode()
         self.send_response(code)
@@ -990,17 +1056,22 @@ class Handler(BaseHTTPRequestHandler):
         self._send(200, {'ok': True}, self._session_cookie(make_session(), SESSION_SECONDS))
 
     def _body(self) -> dict:
-        length = int(self.headers.get('Content-Length', 0) or 0)
-        if length > (_MAX_BODY_AUTHED if self._authed() else _MAX_BODY):
+        try:
+            length = int(self.headers.get('Content-Length', 0) or 0)
+        except ValueError:
+            return {}
+        # (a negative length would make read() wait for the connection to close)
+        if length <= 0 or length > (_MAX_BODY_AUTHED if self._authed() else _MAX_BODY):
             return {}
         try:
             data = json.loads(self.rfile.read(length) or b'{}')
-        except ValueError:
+        except (ValueError, OSError):
             return {}
         return data if isinstance(data, dict) else {}
 
     def _setup_code_ok(self, body: dict) -> bool:
-        return not _admin().get('hash') and hmac.compare_digest(str(body.get('code') or '').strip(), setup_code())
+        code = str(body.get('code') or '').strip()
+        return not _admin().get('hash') and hmac.compare_digest(code.encode(), setup_code().encode())
 
     def do_GET(self):  # noqa: N802
         path = self.path.split('?', 1)[0]
@@ -1064,8 +1135,11 @@ class Handler(BaseHTTPRequestHandler):
             if path == '/api/setup':
                 if _admin().get('hash'):
                     return self._send(403, {'error': '已经设置过了，请直接登录'})
+                if not attempt_allowed(self._client()):
+                    return self._send(429, {'error': '尝试次数太多，请 10 分钟后再试'})
                 if not self._setup_code_ok(body):
                     return self._send(403, {'error': '设置码不对（在服务器上运行 docker logs wechat_linux 查看）'})
+                attempt_ok(self._client())
                 if len(str(body.get('password') or '')) < 8:
                     raise ValueError('密码至少 8 位')
                 if body.get('api_key'):
@@ -1073,20 +1147,24 @@ class Handler(BaseHTTPRequestHandler):
                 set_password(str(body.get('password')))
                 return self._login_ok()
             if path == '/api/login':
-                now = time.time()
-                _login_failures[:] = [t for t in _login_failures if now - t < 600]
-                if len(_login_failures) >= 10:
+                if not attempt_allowed(self._client()):
                     return self._send(429, {'error': '尝试次数太多，请 10 分钟后再试'})
                 if not check_password(str(body.get('password') or '')):
-                    _login_failures.append(now)
                     time.sleep(1)
                     return self._send(403, {'error': '密码不对'})
+                attempt_ok(self._client())
                 return self._login_ok()
             if path == '/api/logout':
                 return self._send(200, {'ok': True}, self._session_cookie('', 0))
             if path == '/api/llm/test':
-                if not (self._authed() or self._setup_code_ok(body)):
-                    return self._send(401, {'error': 'login required'})
+                if not self._authed():
+                    # Before setup the page may test a key, but only with the setup code -
+                    # and guesses at that code are counted like wrong passwords.
+                    if not attempt_allowed(self._client()):
+                        return self._send(429, {'error': '尝试次数太多，请 10 分钟后再试'})
+                    if not self._setup_code_ok(body):
+                        return self._send(401, {'error': 'login required'})
+                    attempt_ok(self._client())
                 cur = read_llm()
                 base = str(body.get('base_url') or cur.get('base_url') or DEFAULT_BASE_URL).strip()
                 same = base.rstrip('/') == str(cur.get('base_url') or '').rstrip('/')
@@ -1131,8 +1209,11 @@ class Handler(BaseHTTPRequestHandler):
             elif path == '/api/stickers/named/delete':
                 self._send(200, delete_named(str(body.get('name') or '')))
             elif path == '/api/password':
+                if not attempt_allowed(self._client()):
+                    return self._send(429, {'error': '尝试次数太多，请 10 分钟后再试'})
                 if not check_password(str(body.get('old') or '')):
                     return self._send(403, {'error': '原密码不对'})
+                attempt_ok(self._client())
                 set_password(str(body.get('new') or ''))
                 self._login_ok()
             else:

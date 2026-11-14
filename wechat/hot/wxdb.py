@@ -6,6 +6,11 @@ decrypt pages ourselves (python3-cryptography) into a plain SQLite file under /d
 and query it with the standard sqlite3 module. The write-ahead log (-wal) is applied on
 every refresh so new messages are visible within seconds, without waiting for WeChat to
 checkpoint. Nothing is ever written to WeChat's own files.
+
+Memory: the copy is built by streaming (1 MB at a time) and afterwards only the pages
+that newly committed WAL frames touch are rewritten in place. Nothing database-sized is
+ever held in this process - an earlier version kept the whole decrypted file in RAM and
+copied it on every pass, which left the bot at ~200 MB.
 """
 
 from __future__ import annotations
@@ -24,6 +29,9 @@ RESERVE = 80
 SQLITE_HEADER = b'SQLite format 3\x00'
 KEY_FILE = pathlib.Path.home() / '.wxbot' / 'keys.json'
 PLAIN_DIR = pathlib.Path('/dev/shm/wxbot')
+WAL_HEADER = 32
+FRAME = 24 + PAGE
+CHUNK_PAGES = 256  # pages decrypted per read while building the base copy (1 MB)
 
 
 def load_keys() -> dict[str, bytes]:
@@ -47,60 +55,19 @@ class PlainCopy:
 
     def __init__(self, src: str, key: bytes):
         self.src = pathlib.Path(src)
+        self.wal = self.src.with_name(self.src.name + '-wal')
         self.key = key
         PLAIN_DIR.mkdir(mode=0o700, exist_ok=True)
         name = hashlib.sha1(str(self.src).encode()).hexdigest()[:12] + '_' + self.src.name
         self.dst = PLAIN_DIR / name
-        self._base: bytearray | None = None
-        self._base_sig: tuple | None = None
-
-    def _load_base(self) -> bytearray:
-        st = os.stat(self.src)
-        sig = (st.st_mtime_ns, st.st_size)
-        if self._base is None or sig != self._base_sig:
-            data = self.src.read_bytes()
-            out = bytearray()
-            for i in range(len(data) // PAGE):
-                out += _decrypt_page(self.key, data[i * PAGE : (i + 1) * PAGE], i + 1)
-            self._base, self._base_sig = out, sig
-        return self._base
-
-    def _apply_wal(self, db: bytearray) -> bytearray:
-        wal = self.src.with_name(self.src.name + '-wal')
-        try:
-            data = wal.read_bytes()
-        except OSError:
-            return db
-        if len(data) < 32:
-            return db
-        salt1, salt2 = data[16:20], data[20:24]
-        pending: dict[int, bytes] = {}
-        committed: dict[int, bytes] = {}
-        size_pages = len(db) // PAGE
-        off = 32
-        while off + 24 + PAGE <= len(data):
-            hdr = data[off : off + 24]
-            pgno, commit_size = struct.unpack('>II', hdr[:8])
-            if hdr[8:12] != salt1 or hdr[12:16] != salt2:
-                break  # stale frames from an older WAL generation
-            pending[pgno] = data[off + 24 : off + 24 + PAGE]
-            if commit_size:
-                committed.update(pending)
-                pending.clear()
-                size_pages = commit_size
-            off += 24 + PAGE
-        if not committed:
-            return db
-        out = bytearray(db)
-        if size_pages * PAGE > len(out):
-            out += bytes(size_pages * PAGE - len(out))
-        for pgno, page in committed.items():
-            out[(pgno - 1) * PAGE : pgno * PAGE] = _decrypt_page(self.key, page, pgno)
-        return out[: size_pages * PAGE]
+        self._last_sig: tuple | None = None
+        # What self.dst holds: which base file, which WAL generation (its salts) and how
+        # far into that WAL (the offset just past the last applied commit frame).
+        self._state: dict | None = None
 
     def _sig(self) -> tuple:
         out = []
-        for f in (self.src, self.src.with_name(self.src.name + '-wal')):
+        for f in (self.src, self.wal):
             try:
                 st = os.stat(f)
                 out.append((st.st_mtime_ns, st.st_size))
@@ -108,19 +75,89 @@ class PlainCopy:
                 out.append(None)
         return tuple(out)
 
+    def _write_base(self, tmp: pathlib.Path) -> None:
+        pgno = 0
+        with open(self.src, 'rb') as src, open(tmp, 'wb') as out:
+            os.chmod(tmp, 0o600)
+            while True:
+                chunk = src.read(PAGE * CHUNK_PAGES)
+                if len(chunk) < PAGE:
+                    break
+                for i in range(len(chunk) // PAGE):
+                    pgno += 1
+                    out.write(_decrypt_page(self.key, chunk[i * PAGE : (i + 1) * PAGE], pgno))
+
+    def _wal_frames(self, start: int):
+        """Committed frames of the WAL from byte `start` on.
+        -> (salts, {pgno: encrypted page}, database size in pages after the last commit
+        (0: no commit), offset just past that commit); None if there is no usable WAL."""
+        try:
+            with open(self.wal, 'rb') as f:
+                head = f.read(WAL_HEADER)
+                if len(head) < WAL_HEADER:
+                    return None
+                f.seek(0, 2)
+                if f.tell() < start:
+                    return None  # shorter than what was already applied: a new log
+                f.seek(start)
+                data = f.read()
+        except OSError:
+            return None
+        salts = head[16:24]
+        pending: dict[int, bytes] = {}
+        committed: dict[int, bytes] = {}
+        size_pages, end, off = 0, start, 0
+        while off + FRAME <= len(data):
+            pgno, commit_size = struct.unpack_from('>II', data, off)
+            if data[off + 8 : off + 16] != salts:
+                break  # stale frames from an older WAL generation
+            pending[pgno] = data[off + 24 : off + FRAME]
+            off += FRAME
+            if commit_size:
+                committed.update(pending)
+                pending.clear()
+                size_pages, end = commit_size, start + off
+        return salts, committed, size_pages, end
+
+    def _patch(self, path: pathlib.Path, committed: dict[int, bytes], size_pages: int) -> None:
+        with open(path, 'r+b') as f:
+            if size_pages:
+                for pgno, page in committed.items():
+                    if 1 <= pgno <= size_pages:
+                        f.seek((pgno - 1) * PAGE)
+                        f.write(_decrypt_page(self.key, page, pgno))
+                f.truncate(size_pages * PAGE)  # the commit says how big the database is now
+            # Mark the plain copy as a normal rollback-journal database.
+            f.seek(0, 2)
+            if f.tell() >= 20:
+                f.seek(18)
+                f.write(b'\x01\x01')
+
     def refresh(self) -> pathlib.Path:
-        # Nothing changed since the last copy: reuse it. Decrypting and writing a 30 MB
-        # database every pass kept ~100 MB churning in RAM and /dev/shm.
         sig = self._sig()
-        if sig == getattr(self, '_last_sig', None) and self.dst.exists():
-            return self.dst
-        db = self._apply_wal(self._load_base())
-        # Mark the plain copy as a normal rollback-journal database.
-        db[18:20] = b'\x01\x01'
+        if sig == self._last_sig and self.dst.exists():
+            return self.dst  # nothing changed since the last copy
+        st = self._state
+        if st is not None and st['base'] == sig[0] and st['salts'] is not None and self.dst.exists():
+            wal = self._wal_frames(st['off'])
+            if wal is not None and wal[0] == st['salts']:
+                # Same base file, same log, just longer: rewrite only the new pages.
+                # (In place - the only reader is this process, between two refreshes.)
+                _salts, committed, size_pages, end = wal
+                if size_pages:
+                    self._state = None  # a crash half-way must lead to a full rebuild
+                    self._patch(self.dst, committed, size_pages)
+                    self._state = {**st, 'off': end}
+                self._last_sig = sig
+                return self.dst
+        # First time, a checkpoint rewrote the base file, or the log started over.
         tmp = self.dst.with_suffix('.tmp')
-        tmp.write_bytes(db)
-        os.chmod(tmp, 0o600)
+        self._write_base(tmp)
+        wal = self._wal_frames(WAL_HEADER)
+        salts, committed, size_pages, end = wal if wal is not None else (None, {}, 0, WAL_HEADER)
+        self._patch(tmp, committed, size_pages)
         tmp.replace(self.dst)
+        self._state = {'base': sig[0], 'salts': salts, 'off': end}
         self._last_sig = sig
         return self.dst
 

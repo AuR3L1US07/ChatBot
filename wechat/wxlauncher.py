@@ -25,8 +25,6 @@ import subprocess
 import sys
 import time
 
-import numpy as np
-
 WECHAT = '/opt/wechat/wechat'
 HOME = pathlib.Path.home()
 DATA_ROOT = HOME / 'xwechat_files'
@@ -114,6 +112,8 @@ def _candidates(buf: bytes):
     n = (len(buf) - 32) // 8
     if n <= 0:
         return
+    import numpy as np  # only this (rarely used) scan needs it: ~15 MB kept out of the launcher
+
     arr = np.frombuffer(buf, dtype=np.uint8)
     windows = np.lib.stride_tricks.as_strided(arr, shape=(n, 32), strides=(8, 1))
     zeros = (windows == 0).sum(axis=1)
@@ -137,9 +137,15 @@ def extract_keys() -> int:
         known = json.loads(KEY_FILE.read_text())
     except (OSError, ValueError):
         known = {}
+    if not isinstance(known, dict):
+        known = {}
     # Drop keys that no longer match (e.g. after re-login), keep valid ones.
     for path in list(known):
-        if path not in targets or not _check(bytes.fromhex(known[path]), targets[path]):
+        try:
+            good = path in targets and _check(bytes.fromhex(known[path]), targets[path])
+        except (TypeError, ValueError):
+            good = False  # a damaged entry: without this, extraction failed forever
+        if not good:
             known.pop(path)
     if len(known) < len(targets):
         cap = _hot('wxcapture')

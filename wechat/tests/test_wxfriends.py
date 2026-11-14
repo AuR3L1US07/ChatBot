@@ -219,9 +219,9 @@ def run():
 
     # 9. the live 4.x layout: row "…等待验证" → pane with 前往验证 → 通过朋友验证 → 确定.
     #    A stale 通过朋友验证 frame (previous person's 备注) is already "showing".
-    check('等待验证 is pending, not done', wxfriends.ACCEPT_STATUS.search('孙金辰我是孙金辰等待验证') is not None
-          and not wxfriends.DONE_STATUS.search('孙金辰我是孙金辰等待验证'))
-    app = build(['孙金辰我是孙金辰等待验证', '草上白羊我是草上白羊已添加'])
+    check('等待验证 is pending, not done', wxfriends.ACCEPT_STATUS.search('张三我是张三等待验证') is not None
+          and not wxfriends.DONE_STATUS.search('张三我是张三等待验证'))
+    app = build(['张三我是张三等待验证', '李四我是李四已添加'])
     main = Node('微信', 'frame', w=1228, h=768)
     for child in list(app.children):
         main.add(child)
@@ -236,7 +236,7 @@ def run():
         return f
 
     events = []
-    verify_frame('草上白羊', lambda: events.append('stale 确定'))  # left over, still "showing"
+    verify_frame('李四', lambda: events.append('stale 确定'))  # left over, still "showing"
 
     def do_confirm():
         events.append('确定')
@@ -245,7 +245,7 @@ def run():
 
     def go_verify():
         events.append('前往验证')
-        verify_frame('孙金辰', do_confirm)  # WeChat opens a NEW window
+        verify_frame('张三', do_confirm)  # WeChat opens a NEW window
 
     def mouse_click(x, y):
         for win in reversed(DESKTOP[0].children[0].children):  # newest window is on top
@@ -257,13 +257,13 @@ def run():
         if x < 302:  # a row body
             events.append('row')
             if not any(n.name == '前往验证' for n in main.children):
-                main.add(Node('孙金辰', 'push button', x=608, y=121, w=60, h=60))
+                main.add(Node('张三', 'push button', x=608, y=121, w=60, h=60))
                 main.add(Node('前往验证', 'push button', x=708, y=352, w=112, h=30)).mouse = go_verify
         return True
 
     wxfriends._click_at = mouse_click
     accepted = wxfriends.accept_all()
-    check('4.x pane flow accepted', accepted == ['孙金辰我是孙金辰'], str(accepted))
+    check('4.x pane flow accepted', accepted == ['张三我是张三'], str(accepted))
     check('4.x order row→前往验证→确定', events == ['row', '前往验证', '确定'], str(events))
 
     # 10. 前往验证 that does not refresh the stale dialog must not click its 确定
@@ -274,7 +274,7 @@ def run():
     app.children = []
     app.add(main)
     stale = app.add(Node('通过朋友验证', 'frame', x=433, y=63, w=360, h=640))
-    stale.add(Node('草上白羊', 'label', x=470, y=167, w=288, h=28))
+    stale.add(Node('李四', 'label', x=470, y=167, w=288, h=28))
     hits = []
     stale.add(Node('确定', 'push button', x=489, y=648, w=112, h=30)).mouse = lambda: hits.append(1)
     main.add(Node('李雷', 'push button', x=608, y=121, w=60, h=60))
