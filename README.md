@@ -10,7 +10,7 @@
   <a href="https://github.com/AuR3L1US07/ChatBot/actions"><img src="https://img.shields.io/github/actions/workflow/status/AuR3L1US07/ChatBot/image.yml?style=flat-square&label=image" alt="build"></a>
 </p>
 
-**私聊秒回 · 群里会接梗 · 看得懂图 · 会偷表情包 · 记得住每个群的黑话**<br>
+**私聊秒回 · 群里会接梗 · 看得懂图 · 会偷表情包 · 记得住每个群的黑话 · Github上收到的第一个readme[耶][耶][耶]**<br>
 所有设置都在网页后台里点几下完成，不用改代码。
 
 [快速开始](#-快速开始) · [功能](#-功能) · [界面预览](#️-界面预览) · [工作原理](#-工作原理) · [常见问题](#-常见问题)
